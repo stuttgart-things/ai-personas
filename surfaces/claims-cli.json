@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": ["Bash(claims:*)", "Bash(curl:*)"],
+    "deny": [
+      "Bash(kubectl:*)",
+      "Bash(gh:*)",
+      "Bash(git:*)",
+      "Bash(vault:*)",
+      "Bash(ssh:*)",
+      "Read(~/.config/claims/**)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}

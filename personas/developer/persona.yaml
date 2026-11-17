@@ -1,0 +1,14 @@
+# Entwickler eines Teams: bestellt für sich und sein Team.
+name: developer
+description: Entwickler in einem Team, kennt Kubernetes, aber nicht diese Plattform
+identity:
+  # Machine-User persona-developer je Lab; Endpunkte und Vault-Pfad kommen
+  # aus der Lab-Bindung im privaten Fleet-Repo.
+  machineUser: persona-developer
+  roles:
+    - backstage-developer        # group:default/guests
+    - backstage-team-ai-personas # group:default/ai-personas (Owner-Auswahl)
+surface: claims-cli
+budget:
+  usd: 3
+  vms: 2
