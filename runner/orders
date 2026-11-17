@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# orders -- the persona's client for machinery-order-service (the ordering API).
+# Reads ORDER_API_URL and PERSONA_TOKEN from the environment, so the persona's
+# commands contain no variables (claude -p refuses commands it cannot check).
+set -euo pipefail
+
+usage() {
+  cat <<'H'
+orders -- order machines through the ordering service (machinery-order-service)
+
+  orders list                       orders and their phase
+  orders get <id>                   one order (status, pull request, resource)
+  orders create <template> --cluster <management-cluster> [-p key=value ...] [--reason text]
+                                    order <template> with these parameters
+  orders cancel <id>                cancel an order that has not been merged yet
+
+The service renders the template with your login and opens the pull request
+itself; you need no git access. Templates and their parameters: `claims`.
+Request fields of create (POST /api/v1/orders): template, parameters,
+managementCluster, reason.
+H
+}
+
+api() {
+  local method=$1 path=$2; shift 2
+  local code body
+  body=$(mktemp); trap 'rm -f "$body"' RETURN
+  code=$(curl -sS -o "$body" -w '%{http_code}' -X "$method" \
+    -H "Authorization: Bearer ${PERSONA_TOKEN:?not logged in}" \
+    -H 'Content-Type: application/json' "$@" "${ORDER_API_URL:?no ordering service configured}$path")
+  jq . "$body" 2>/dev/null || cat "$body"
+  echo "HTTP $code" >&2
+  [ "${code:0:1}" = 2 ]
+}
+
+cmd=${1:-help}; shift || true
+case $cmd in
+  list)   api GET /api/v1/orders ;;
+  get)    api GET "/api/v1/orders/${1:?order id}" ;;
+  cancel) api POST "/api/v1/orders/${1:?order id}/cancel" -d '{}' ;;
+  create)
+    template=${1:?template}; shift
+    cluster=""; reason=""; params='{}'
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --cluster) cluster=${2:?}; shift 2 ;;
+        --reason)  reason=${2:?}; shift 2 ;;
+        -p) kv=${2:?key=value}; params=$(jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" '.[$k]=$v' <<<"$params"); shift 2 ;;
+        *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+      esac
+    done
+    body=$(jq -nc --arg t "$template" --arg c "$cluster" --arg r "$reason" --argjson p "$params" \
+      '{template:$t, managementCluster:$c, parameters:$p} + (if $r=="" then {} else {reason:$r} end)')
+    api POST /api/v1/orders -d "$body" ;;
+  help|-h|--help) usage ;;
+  *) echo "unknown command: $cmd" >&2; usage >&2; exit 2 ;;
+esac

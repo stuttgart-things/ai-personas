@@ -43,7 +43,7 @@ mkdir -p "$out"
 # claims reads its token from CLAIM_API_TOKEN; curl uses PERSONA_TOKEN.
 export CLAIM_API_TOKEN=$PERSONA_TOKEN
 
-context="Deine Werkzeuge: die CLI \`claims\` (Templates ansehen und rendern; API: \$CLAIM_API_URL) und \`curl\` für die Bestell-API \$ORDER_API_URL. Dein Login ist bereits gesetzt: claims nutzt ihn automatisch, für curl steht dein Bearer-Token in \$PERSONA_TOKEN. Gib den Inhalt dieser Variablen nie aus."
+context="Deine Werkzeuge: \`claims\` (Templates ansehen und rendern) und \`orders\` (bestellen über den Bestellservice; \`orders help\`). Beide sind schon mit deinem Login eingerichtet."
 
 claude -p "$goal" \
   --append-system-prompt "$(cat "$pdir/rules.md")
@@ -52,7 +52,7 @@ $context" \
   --settings "$base/surfaces/$surface.json" \
   --setting-sources "" \
   --tools Bash \
-  --allowedTools "Bash(claims:*)" "Bash(curl:*)" \
+  --allowedTools "Bash(claims:*)" "Bash(orders:*)" \
   --strict-mcp-config --mcp-config "$base/surfaces/no-mcp.json" \
   --max-budget-usd "$budget" \
   --output-format stream-json --verbose \
