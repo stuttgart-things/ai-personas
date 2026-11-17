@@ -1,0 +1,11 @@
+# Neu im Unternehmen, noch keinem Team zugeordnet.
+name: newcomer
+description: Neu, noch in keinem Team, hat die Doku nicht gelesen
+identity:
+  machineUser: persona-newcomer
+  roles:
+    - backstage-developer        # group:default/guests, kein Team
+surface: claims-cli
+budget:
+  usd: 2
+  vms: 1

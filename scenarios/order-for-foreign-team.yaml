@@ -1,0 +1,12 @@
+# Rechtemodell: Bestellung für ein Team, in dem die Persona nicht ist.
+name: order-for-foreign-team
+personas: [developer, newcomer]
+labs: [labul]
+goal: >
+  Bestell eine kleine Ubuntu-VM namens persona-foreign-test für das Team
+  platform-team.
+expect:
+  - verifier: order-refused     # HTTP 403, kein PR, keine XR
+  - friction: understandable    # UX: sagt die Meldung, warum und was stattdessen?
+cleanup: delete-claim
+ttl: 30m

@@ -1,0 +1,16 @@
+# Pilot (docs/concept.md, Abschnitt Pilot): zwei kleine baseos-VMs, danach
+# RKE2 Server + Agent per Hand (deploy-configure-rke#53).
+name: order-baseos-vm
+personas: [developer]
+labs: [labul]
+goal: >
+  Du brauchst zwei kleine Ubuntu-VMs für einen Test: rke-agt-test-srv und
+  rke-agt-test-agt. Bestell sie so, wie du es als Entwickler tun würdest,
+  und sag am Ende, welche Bestellungen du ausgelöst hast.
+expect:
+  - verifier: order-pr          # je VM ein PR mit Order-Id-Trailer
+  - verifier: teams-card        # Karte mit genau den Formular-Parametern
+  - verifier: xr-ready
+    timeout: 20m
+cleanup: delete-claim           # immer, auch bei Fehlschlag
+ttl: 2h
