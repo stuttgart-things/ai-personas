@@ -4,11 +4,14 @@
 #
 # Environment (set by runner/run.sh, never baked into the image):
 #   PERSONA_TOKEN      short-lived ZITADEL access token of the persona (required)
-#   ANTHROPIC_API_KEY  for claude (required)
+#   CLAUDE_CODE_OAUTH_TOKEN  claude via a Claude subscription (claude setup-token),
+#   or ANTHROPIC_API_KEY     claude via the API; one of the two is required
 #   CLAIM_API_URL      claim-machinery-api of the lab (templates, render)
 #   ORDER_API_URL      machinery-order-service of the lab (ordering)
 #   RUN_ID             defaults to <utc time>-<persona>-<scenario>
 #   OUT_DIR            defaults to /out (mount a host directory there)
+# Mounted file (optional): /etc/ssl/extra/ca.pem, the lab's root CA; added to
+# the system roots for claims, curl and claude.
 set -euo pipefail
 
 persona=${1:?persona}; scenario=${2:?scenario}
@@ -17,7 +20,17 @@ pdir=$base/personas/$persona
 sfile=$base/scenarios/$scenario.yaml
 [ -f "$pdir/persona.yaml" ] || { echo "unknown persona: $persona" >&2; exit 2; }
 [ -f "$sfile" ] || { echo "unknown scenario: $scenario" >&2; exit 2; }
-: "${PERSONA_TOKEN:?PERSONA_TOKEN missing}" "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY missing}"
+: "${PERSONA_TOKEN:?PERSONA_TOKEN missing}"
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ] \
+  || { echo "CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY missing" >&2; exit 1; }
+
+# Lab root CA in addition to the system roots (Go: SSL_CERT_FILE, curl:
+# CURL_CA_BUNDLE, node: NODE_EXTRA_CA_CERTS).
+if [ -s /etc/ssl/extra/ca.pem ]; then
+  cat /etc/ssl/certs/ca-certificates.crt /etc/ssl/extra/ca.pem > /tmp/ca-bundle.pem
+  export SSL_CERT_FILE=/tmp/ca-bundle.pem CURL_CA_BUNDLE=/tmp/ca-bundle.pem \
+         NODE_EXTRA_CA_CERTS=/etc/ssl/extra/ca.pem
+fi
 
 yaml() { js-yaml "$1" | jq -r "$2"; }
 surface=$(yaml "$pdir/persona.yaml" .surface)
@@ -45,12 +58,17 @@ $context" \
   --output-format stream-json --verbose \
   > "$out/transcript.jsonl" || echo "claude exited with $?" >&2
 
-# A token in the output stops the run here: nothing of it may be kept.
-if grep -qF "$PERSONA_TOKEN" "$out"/* 2>/dev/null; then
-  rm -rf "$out"
-  echo "persona token found in the run output; output deleted" >&2
-  exit 3
-fi
+# A credential in the output stops the run here: nothing of it may be kept.
+# The persona's Bash sees claude's environment, so all three are checked.
+for v in PERSONA_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
+  val=${!v:-}
+  [ -n "$val" ] || continue
+  if grep -qF "$val" "$out"/* 2>/dev/null; then
+    rm -rf "$out"
+    echo "$v found in the run output; output deleted" >&2
+    exit 3
+  fi
+done
 
 grep -ohE 'FRICTION: [^"\\]*' "$out/transcript.jsonl" | sort -u > "$out/friction.txt" || true
 jq -s '{run: $run, persona: $p, scenario: $s,

@@ -46,6 +46,8 @@ tasks:
         [ $rc -eq 1 ] || { echo "entrypoint without token: exit $rc, want 1"; exit 1; }
         docker run --rm -e PERSONA_TOKEN=x -e ANTHROPIC_API_KEY=x {{.IMAGE}} nobody {{.SCENARIO}} >/dev/null 2>&1; rc=$?
         [ $rc -eq 2 ] || { echo "unknown persona: exit $rc, want 2"; exit 1; }
+        docker run --rm -e PERSONA_TOKEN=x {{.IMAGE}} {{.PERSONA}} {{.SCENARIO}} >/dev/null 2>&1; rc=$?
+        [ $rc -eq 1 ] || { echo "without claude credentials: exit $rc, want 1"; exit 1; }
         echo "entrypoint guards ok"
 
   shell:
@@ -55,6 +57,6 @@ tasks:
       - dagger -c 'host | directory . | docker-build --dockerfile {{.CONTAINERFILE}} | terminal --cmd bash'
 
   run:
-    desc: One persona run (needs LAB, CLAIM_API_URL, ORDER_API_URL, ANTHROPIC_API_KEY, VAULT_ADDR, VAULT_TOKEN), e.g. task run PERSONA=developer SCENARIO=order-baseos-vm
+    desc: One persona run (needs LAB_FILE or LAB/CLAIM_API_URL/ORDER_API_URL, VAULT_ADDR, VAULT_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY), e.g. task run PERSONA=developer SCENARIO=order-baseos-vm
     cmds:
       - IMAGE={{.IMAGE}} runner/run.sh {{.PERSONA}} {{.SCENARIO}}
