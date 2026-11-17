@@ -49,6 +49,12 @@ tasks:
         docker run --rm -e PERSONA_TOKEN=x {{.IMAGE}} {{.PERSONA}} {{.SCENARIO}} >/dev/null 2>&1; rc=$?
         [ $rc -eq 1 ] || { echo "without claude credentials: exit $rc, want 1"; exit 1; }
         echo "entrypoint guards ok"
+      - |
+        out=$(mktemp -d)
+        docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/persona-home -v "$out:/out" --entrypoint bash {{.IMAGE}} \
+          -c 'mkdir -p /out/probe "$HOME" && touch /out/probe/ok && js-yaml --version >/dev/null && claude --version >/dev/null'
+        test -f "$out/probe/ok" || { echo "output dir not writable as the caller"; exit 1; }
+        rm -rf "$out"; echo "output mount ok"
 
   shell:
     desc: Open a shell in the persona's environment (Dagger terminal) to see what it sees
