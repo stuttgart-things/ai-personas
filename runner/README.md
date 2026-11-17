@@ -30,10 +30,15 @@ Versions are build args: `CLAUDE_CODE_VERSION`, `CLAIMS_VERSION`, `JS_YAML_VERSI
 The lab binding (endpoints, Vault, CA) lives in the private fleet repo; this repo names no hosts.
 
 ```bash
-export LAB=labul CLAIM_API_URL=... ORDER_API_URL=... ANTHROPIC_API_KEY=...
-export VAULT_ADDR=... VAULT_TOKEN=...      # read on ai-personas/<lab>/*
-runner/run.sh developer order-baseos-vm
-ls runs/<run-id>/                          # transcript.jsonl friction.txt summary.json
+export LAB_FILE=<fleet repo>/ai-personas/labul.yaml   # lab, claimApiUrl, orderApiUrl, caFile
+export VAULT_ADDR=... VAULT_TOKEN=...                 # read on ai-personas/<lab>/*
+export CLAUDE_CODE_OAUTH_TOKEN=...                    # claude setup-token (subscription), or ANTHROPIC_API_KEY
+task run PERSONA=developer SCENARIO=order-baseos-vm
+ls runs/<run-id>/                                     # transcript.jsonl friction.txt summary.json
 ```
+
+**Subscription instead of an API key** (`claude setup-token`): fine for local test runs; the token belongs to one person's account and its usage limits, so it stays out of shared CI. Regular CI runs use an API key.
+
+The lab's root CA (`caFile`) is mounted at `/etc/ssl/extra/ca.pem` and added to the system roots for `claims`, `curl` and `claude`.
 
 Transcripts contain API answers and hostnames: keep them out of this public repo (`runs/` is ignored).

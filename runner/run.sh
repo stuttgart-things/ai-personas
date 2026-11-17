@@ -3,23 +3,41 @@
 # runner container with only that token. Prints no secret.
 # usage: runner/run.sh <persona> <scenario>
 #
-# Environment (the lab binding, kept in the private fleet repo):
+# Lab binding, either LAB_FILE (YAML in the private fleet repo, read with yq):
+#   lab: labul
+#   claimApiUrl: https://...
+#   orderApiUrl: https://...
+#   caFile: path/to/root-ca.pem   # relative to the fleet repo root
+# or the same as environment: LAB, CLAIM_API_URL, ORDER_API_URL, CA_FILE.
+#
+# Credentials (environment, never in a file here):
 #   VAULT_ADDR, VAULT_TOKEN  read access to ai-personas/<lab>/<persona>
-#   LAB                      e.g. labul (Vault path segment)
-#   CLAIM_API_URL, ORDER_API_URL
-#   ANTHROPIC_API_KEY
-#   OIDC_CA_FILE             optional: CA bundle for the ZITADEL token URL
-#   IMAGE                    default ai-personas-runner:local
-#   OUT_DIR                  default ./runs
+#   CLAUDE_CODE_OAUTH_TOKEN  (claude setup-token, subscription) or ANTHROPIC_API_KEY
+# Optional: IMAGE (default ai-personas-runner:local), OUT_DIR (default ./runs)
 set -euo pipefail
 persona=${1:?persona}; scenario=${2:?scenario}
-: "${LAB:?LAB}" "${CLAIM_API_URL:?}" "${ORDER_API_URL:?}" "${ANTHROPIC_API_KEY:?}"
+
+if [ -n "${LAB_FILE:-}" ]; then
+  root=$(git -C "$(dirname "$LAB_FILE")" rev-parse --show-toplevel)
+  LAB=$(yq -r .lab "$LAB_FILE")
+  CLAIM_API_URL=$(yq -r .claimApiUrl "$LAB_FILE")
+  ORDER_API_URL=$(yq -r .orderApiUrl "$LAB_FILE")
+  ca=$(yq -r '.caFile // ""' "$LAB_FILE"); [ -n "$ca" ] && CA_FILE=$root/$ca
+fi
+: "${LAB:?LAB}" "${CLAIM_API_URL:?CLAIM_API_URL}" "${ORDER_API_URL:?ORDER_API_URL}"
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ] \
+  || { echo "CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY missing" >&2; exit 1; }
+export CLAIM_API_URL ORDER_API_URL
 image=${IMAGE:-ai-personas-runner:local}
 out=${OUT_DIR:-$PWD/runs}; mkdir -p "$out"
 
+cacurl=(); camount=()
+if [ -n "${CA_FILE:-}" ]; then
+  cacurl=(--cacert "$CA_FILE"); camount=(-v "$CA_FILE:/etc/ssl/extra/ca.pem:ro")
+fi
+
 creds=$(vault kv get -format=json "ai-personas/$LAB/$persona" | jq -c .data.data)
-ca=(); [ -n "${OIDC_CA_FILE:-}" ] && ca=(--cacert "$OIDC_CA_FILE")
-token=$(curl -fsS "${ca[@]}" "$(jq -r .token_url <<<"$creds")" \
+token=$(curl -fsS "${cacurl[@]}" "$(jq -r .token_url <<<"$creds")" \
   --data-urlencode grant_type=client_credentials \
   --data-urlencode "client_id=$(jq -r .client_id <<<"$creds")" \
   --data-urlencode "client_secret=$(jq -r .client_secret <<<"$creds")" \
@@ -28,7 +46,8 @@ unset creds
 [ -n "$token" ] || { echo "no token for persona $persona" >&2; exit 1; }
 
 # Values go in by name only (-e VAR), so they never appear in ps or logs.
-PERSONA_TOKEN=$token docker run --rm \
-  -e PERSONA_TOKEN -e ANTHROPIC_API_KEY -e CLAIM_API_URL -e ORDER_API_URL -e RUN_ID \
-  -v "$out:/out" \
-  "$image" "$persona" "$scenario"
+envs=(-e PERSONA_TOKEN -e CLAIM_API_URL -e ORDER_API_URL -e RUN_ID)
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && envs+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+[ -n "${ANTHROPIC_API_KEY:-}" ] && envs+=(-e ANTHROPIC_API_KEY)
+PERSONA_TOKEN=$token docker run --rm "${envs[@]}" "${camount[@]}" \
+  -v "$out:/out" "$image" "$persona" "$scenario"
