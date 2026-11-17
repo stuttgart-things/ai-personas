@@ -1,0 +1,46 @@
+# Runner image of the AI personas (docs/concept.md, section Ausführung).
+# Only what a user has: claude, claims, curl, jq, a YAML parser. No kubectl,
+# gh, git, vault or ssh -- the persona cannot reach anything its token does
+# not allow. Build from the repository root:
+#   docker build -f runner/Containerfile -t ai-personas-runner .
+#   dagger -c 'host | directory . | docker-build --dockerfile runner/Containerfile'
+FROM docker.io/library/node:22-bookworm-slim
+
+ARG CLAUDE_CODE_VERSION=2.1.326
+ARG CLAIMS_VERSION=0.27.0
+ARG JS_YAML_VERSION=4.1.0
+ARG TARGETARCH=amd64
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "js-yaml@${JS_YAML_VERSION}" \
+ && npm cache clean --force
+
+# claims from its GitHub release, checked against the release's checksums.
+RUN set -eux; \
+    f="claims_${CLAIMS_VERSION}_linux_${TARGETARCH}.tar.gz"; \
+    base="https://github.com/stuttgart-things/claims/releases/download/v${CLAIMS_VERSION}"; \
+    cd /tmp; \
+    curl -fsSLO "${base}/${f}"; \
+    curl -fsSL "${base}/checksums.txt" | grep " ${f}\$" | sha256sum -c -; \
+    tar -xzf "${f}" claims; \
+    install -m 0755 claims /usr/local/bin/claims; \
+    rm -f /tmp/claims /tmp/"${f}"
+
+# Fail the build if a tool the persona must not have slipped in.
+RUN for t in kubectl gh git vault ssh; do \
+      if command -v "$t" >/dev/null; then echo "forbidden tool in image: $t"; exit 1; fi; \
+    done
+
+RUN useradd --create-home --uid 10001 persona
+WORKDIR /opt/ai-personas
+COPY personas/ personas/
+COPY scenarios/ scenarios/
+COPY surfaces/ surfaces/
+COPY runner/entrypoint.sh /usr/local/bin/persona-run
+
+USER persona
+WORKDIR /home/persona
+ENTRYPOINT ["/usr/local/bin/persona-run"]
