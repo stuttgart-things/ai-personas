@@ -1,5 +1,6 @@
 # Pilot (docs/concept.md, Abschnitt Pilot): zwei kleine baseos-VMs, danach
 # RKE2 Server + Agent per Hand (deploy-configure-rke#53).
+# Bestellweg: machinery-order-service (POST /api/v1/orders), nicht claims --create-pr.
 name: order-baseos-vm
 personas: [developer]
 labs: [labul]

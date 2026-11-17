@@ -26,5 +26,5 @@ Dieses Repo ist öffentlich. Lab-Endpunkte, Vault-Pfade, die ZITADEL-User der Pe
 
 | Persona | ZITADEL-Rollen | Oberfläche |
 | --- | --- | --- |
-| `developer` | `backstage-developer`, `backstage-team-ai-personas` | claims-CLI + order-pr |
-| `newcomer` | `backstage-developer` (kein Team) | claims-CLI + order-pr |
+| `developer` | `backstage-developer`, `backstage-team-ai-personas` | claims-CLI + machinery-order-service |
+| `newcomer` | `backstage-developer` (kein Team) | claims-CLI + machinery-order-service |
