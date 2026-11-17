@@ -94,9 +94,15 @@ Ein Lauf ist ein Container mit `claude` und `claims`, gestartet mit genau einem 
 - **In CI:** ein normaler Container, als Tekton-Pod oder GitHub-Actions-Job. Dazu eine NetworkPolicy mit Egress nur zu claim-machinery-api, ZITADEL und der Anthropic API.
 - **Lokal beim Entwickeln:** `docker run` mit demselben Image. Docker Sandboxes (`docker sandbox run claude`) passen auch, sind aber für interaktive Sessions gedacht. Für reproduzierbare Läufe ist das eigene Image der bessere Standard, weil CI und lokal dann identisch sind. Später auf dem Cluster: Agent Sandbox (Abschnitt Stufe 2).
 
-**Bestellen ohne GitHub-Rechte.** Die Persona bestellt über den Order-as-PR-Endpunkt von claim-machinery-api (`POST /api/v1/claim-templates/{name}/order-pr`). Den PR öffnet der Server mit seiner GitHub App. Die Persona braucht damit nur ihr ZITADEL-Token, wie ein User im Portal.
+**Bestellen ohne GitHub-Rechte.** Die Persona bestellt über einen Server, der den PR mit seiner eigenen GitHub-Identität öffnet. Sie braucht damit nur ihr ZITADEL-Token, wie ein User im Portal.
 
-Die claims-CLI (v0.27.0) kann Client Credentials (`--api-oidc-client-id`, `--api-oidc-client-secret`, `--api-oidc-token-url`, `--api-oidc-scope` bzw. `$CLAIM_API_OIDC_*`). Ihr `render --create-pr` erstellt den PR aber selbst per Git-Push und braucht dafür `--git-token`. Den Endpunkt order-pr nutzt sie noch nicht. Im Pilot nimmt die Persona deshalb `claims` zum Ansehen und Rendern und `curl` für order-pr; später soll ein `claims order` über order-pr das ersetzen (Feature in claims).
+| Weg | Stand (17.11.2026) | Für den Pilot |
+| --- | --- | --- |
+| machinery-order-service, `POST /api/v1/orders` | läuft auf LabUL; rendert über claim-machinery-api mit dem Token des Bestellers und öffnet den PR selbst; prüft Tokens gegen dieselbe ZITADEL und Audience wie claim-machinery-api | **gewählt** |
+| claim-machinery-api, `POST /api/v1/claim-templates/{name}/order-pr` | auf beiden machinery-Clustern aus: kein Dispatch konfiguriert (GitHub App mit `actions:write` fehlt) | später |
+| `claims render --create-pr` | erstellt den PR selbst per Git-Push, braucht `--git-token` | nein |
+
+Die claims-CLI (v0.27.0) kann Client Credentials (`--api-oidc-client-id`, `--api-oidc-client-secret`, `--api-oidc-token-url`, `--api-oidc-scope` bzw. `$CLAIM_API_OIDC_*`). Im Pilot nimmt die Persona `claims` zum Ansehen und Rendern der Templates und `curl` für die Bestellung bei machinery-order-service. Später soll `claims order` (stuttgart-things/claims#124) das ersetzen.
 
 **Der Aufruf** (`runner/run.sh`, Flags aus `claude --help`):
 
@@ -207,9 +213,11 @@ Der Pilot ist der offene Test von deploy-configure-rke#53: Persona `developer` b
 
 - [x] Repo `stuttgart-things/ai-personas` anlegen, Struktur und Beispieldateien
 - [ ] `runner/Dockerfile` und `runner/run.sh`
-- [ ] Machine-User `persona-developer` (Rollen `backstage-developer`, `backstage-team-ai-personas`) in der LabUL-ZITADEL-Konfiguration, Secret in Vault
-- [x] Prüfen, ob die claims-CLI Order-as-PR kann: Client Credentials ja, order-pr nein; im Pilot `curl` mit ihrem Token
-- [ ] Issue in claims: `claims order` über den order-pr-Endpunkt
+- [x] Machine-User `persona-developer` (Rollen `backstage-developer`, `backstage-team-ai-personas`) in der LabUL-ZITADEL-Konfiguration (gemergt)
+- [ ] `terraform apply` und Client-Secret nach Vault `ai-personas/labul/developer`
+- [x] Prüfen, ob die claims-CLI Order-as-PR kann: Client Credentials ja, order-pr nein
+- [x] Bestellweg für den Pilot: machinery-order-service per `curl` mit dem Persona-Token
+- [x] Issue in claims: `claims order` ohne Git-Token (stuttgart-things/claims#124)
 - [ ] Szenario `order-baseos-vm` mit zwei VMs (`rke-agt-test-srv`, `rke-agt-test-agt`, small)
 - [ ] Erster Lauf lokal mit `docker run`, Transcript lesen, Rules nachschärfen
 - [ ] RKE2 Server + Agent: im Pilot noch per Hand mit deploy-configure-rke, nicht durch die Persona
@@ -221,7 +229,7 @@ Der Pilot ist der offene Test von deploy-configure-rke#53: Persona `developer` b
 
 - Entschieden: dieses Repo public, Lab-Bindung und Läufe im privaten Fleet-Repo (Abschnitt Ablage).
 - Entschieden: Gruppen kommen aus ZITADEL-Projektrollen; eine Persona ist ein dedizierter User mit z. B. `backstage-developer` + `backstage-team-ai-personas` (Abschnitt Identitäten).
-- Entschieden: claims kann Client Credentials; order-pr kommt als `claims order` (Feature), im Pilot `curl` (Abschnitt Ausführung).
+- Entschieden: Bestellweg im Pilot ist machinery-order-service per `curl`; claims kann Client Credentials, `claims order` folgt (claims#124) (Abschnitt Ausführung).
 - Offen: Welcher Anthropic-API-Key für Läufe in CI, und mit welchem Monatsbudget?
 - Entschieden: Ziel sind beide Labs, die ersten Läufe auf LabUL. Persona-User gibt es dann pro Lab, Lab-Bindung im privaten Repo.
 - Vorschlag: Browser-Personas loggen sich mit Passwort + TOTP (Seed in Vault) ein, MFA bleibt an; Fallback eigene Org ohne erzwungenes MFA (Abschnitt Identitäten). Zu prüfen: aktuelle Login-Policy der ZITADEL-Instanzen.
