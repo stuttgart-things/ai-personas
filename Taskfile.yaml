@@ -1,0 +1,60 @@
+# https://taskfile.dev
+# Thin wrappers: the logic lives in runner/Containerfile and runner/run.sh.
+version: "3"
+
+vars:
+  IMAGE: ai-personas-runner:local
+  CONTAINERFILE: runner/Containerfile
+  PERSONA: developer
+  SCENARIO: order-baseos-vm
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the runner image with Dagger and export it to the local Docker as {{.IMAGE}}
+    cmds:
+      - dagger -c 'host | directory . | docker-build --dockerfile {{.CONTAINERFILE}} | export-image {{.IMAGE}}'
+
+  build:docker:
+    desc: Build the runner image with docker build (versions as build args, e.g. CLAUDE_CODE_VERSION=...)
+    vars:
+      BUILD_ARGS: '{{if .CLAUDE_CODE_VERSION}}--build-arg CLAUDE_CODE_VERSION={{.CLAUDE_CODE_VERSION}} {{end}}{{if .CLAIMS_VERSION}}--build-arg CLAIMS_VERSION={{.CLAIMS_VERSION}}{{end}}'
+    cmds:
+      - docker build -f {{.CONTAINERFILE}} {{.BUILD_ARGS}} -t {{.IMAGE}} .
+
+  smoke:
+    desc: Check the image without an API key (user, versions, forbidden tools, YAML parsing, entrypoint guards)
+    cmds:
+      - |
+        docker run --rm --entrypoint bash {{.IMAGE}} -euo pipefail -c '
+          [ "$(id -u)" = 10001 ] || { echo "not running as persona"; exit 1; }
+          claude --version; claims version | head -1; js-yaml --version
+          for t in kubectl gh git vault ssh; do
+            if command -v "$t" >/dev/null; then echo "forbidden tool: $t"; exit 1; fi
+          done
+          cd /opt/ai-personas
+          for p in personas/*/persona.yaml; do js-yaml "$p" | jq -e ".surface and .budget.usd" >/dev/null; done
+          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal" >/dev/null; done
+          echo "image ok"'
+      - |
+        set +e
+        docker run --rm {{.IMAGE}} {{.PERSONA}} {{.SCENARIO}} >/dev/null 2>&1; rc=$?
+        [ $rc -eq 1 ] || { echo "entrypoint without token: exit $rc, want 1"; exit 1; }
+        docker run --rm -e PERSONA_TOKEN=x -e ANTHROPIC_API_KEY=x {{.IMAGE}} nobody {{.SCENARIO}} >/dev/null 2>&1; rc=$?
+        [ $rc -eq 2 ] || { echo "unknown persona: exit $rc, want 2"; exit 1; }
+        echo "entrypoint guards ok"
+
+  shell:
+    desc: Open a shell in the persona's environment (Dagger terminal) to see what it sees
+    interactive: true
+    cmds:
+      - dagger -c 'host | directory . | docker-build --dockerfile {{.CONTAINERFILE}} | terminal --cmd bash'
+
+  run:
+    desc: One persona run (needs LAB, CLAIM_API_URL, ORDER_API_URL, ANTHROPIC_API_KEY, VAULT_ADDR, VAULT_TOKEN), e.g. task run PERSONA=developer SCENARIO=order-baseos-vm
+    cmds:
+      - IMAGE={{.IMAGE}} runner/run.sh {{.PERSONA}} {{.SCENARIO}}
