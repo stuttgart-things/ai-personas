@@ -46,7 +46,9 @@ unset creds
 [ -n "$token" ] || { echo "no token for persona $persona" >&2; exit 1; }
 
 # Values go in by name only (-e VAR), so they never appear in ps or logs.
-envs=(-e PERSONA_TOKEN -e CLAIM_API_URL -e ORDER_API_URL -e RUN_ID)
+# The container runs as the caller's uid so it can write the mounted output
+# directory; HOME is a writable path in the container for claude's state.
+envs=(--user "$(id -u):$(id -g)" -e HOME=/tmp/persona-home -e PERSONA_TOKEN -e CLAIM_API_URL -e ORDER_API_URL -e RUN_ID)
 [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && envs+=(-e CLAUDE_CODE_OAUTH_TOKEN)
 [ -n "${ANTHROPIC_API_KEY:-}" ] && envs+=(-e ANTHROPIC_API_KEY)
 PERSONA_TOKEN=$token docker run --rm "${envs[@]}" "${camount[@]}" \
