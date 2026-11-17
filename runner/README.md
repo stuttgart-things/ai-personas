@@ -8,6 +8,10 @@ The container a persona runs in, and the script that starts it.
 | `entrypoint.sh` | in the container | prompt from scenario + persona rules, `claude -p` with the surface's settings and budget; writes `transcript.jsonl`, `friction.txt`, `summary.json`; deletes the output and fails if the token shows up in it |
 | `run.sh` | host / CI | client credentials from Vault → short-lived token → `docker run` with only that token |
 
+## Tasks
+
+`task` (Taskfile.yaml) wraps the commands below: `build` (Dagger), `build:docker`, `smoke` (image checks without an API key), `shell` (Dagger terminal in the persona's environment), `run`.
+
 ## Build
 
 From the repository root:
