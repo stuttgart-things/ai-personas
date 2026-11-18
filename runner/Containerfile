@@ -1,7 +1,9 @@
 # Runner image of the AI personas (docs/concept.md, section Ausführung).
-# Only what a user has: claude, claims, curl, jq, a YAML parser. No kubectl,
-# gh, git, vault or ssh -- the persona cannot reach anything its token does
-# not allow. Build from the repository root:
+# Only what a user has: claude, claims, curl, jq, a YAML parser, an ssh
+# client. No kubectl, gh, git or vault -- the persona cannot reach anything its
+# token does not allow. ssh works only with a short-lived certificate the
+# runner mounts for scenarios that ask for it (ADR 0003). Build from the
+# repository root:
 #   docker build -f runner/Containerfile -t ai-personas-runner .
 #   dagger -c 'host | directory . | docker-build --dockerfile runner/Containerfile'
 FROM docker.io/library/node:22-bookworm-slim
@@ -12,7 +14,7 @@ ARG JS_YAML_VERSION=4.1.0
 ARG TARGETARCH=amd64
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl jq \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "js-yaml@${JS_YAML_VERSION}" \
@@ -30,7 +32,7 @@ RUN set -eux; \
     rm -f /tmp/claims /tmp/"${f}"
 
 # Fail the build if a tool the persona must not have slipped in.
-RUN for t in kubectl gh git vault ssh; do \
+RUN for t in kubectl gh git vault; do \
       if command -v "$t" >/dev/null; then echo "forbidden tool in image: $t"; exit 1; fi; \
     done
 
@@ -40,7 +42,7 @@ COPY personas/ personas/
 COPY scenarios/ scenarios/
 COPY surfaces/ surfaces/
 COPY runner/entrypoint.sh /usr/local/bin/persona-run
-COPY runner/orders /usr/local/bin/orders
+COPY runner/report /usr/local/bin/persona-report
 
 USER persona
 WORKDIR /home/persona
