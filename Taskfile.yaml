@@ -33,14 +33,14 @@ tasks:
         docker run --rm --entrypoint bash {{.IMAGE}} -euo pipefail -c '
           [ "$(id -u)" = 10001 ] || { echo "not running as persona"; exit 1; }
           claude --version; claims version | head -1; js-yaml --version; ssh -V
-          claims order --help | grep -q -- "--cluster" || { echo "claims has no order command"; exit 1; }
+          claims order --help | grep -q -- "--auto-merge" || { echo "claims has no order --auto-merge"; exit 1; }
           test -x /usr/local/bin/persona-report || { echo "persona-report missing"; exit 1; }
           for t in kubectl gh git vault orders; do
             if command -v "$t" >/dev/null; then echo "forbidden tool: $t"; exit 1; fi
           done
           cd /opt/ai-personas
           for p in personas/*/persona.yaml; do js-yaml "$p" | jq -e ".surface and .budget.usd" >/dev/null; done
-          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal" >/dev/null; done
+          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal and ((.merge // \"human\") | IN(\"human\", \"auto\"))" >/dev/null || { echo "bad scenario $s"; exit 1; }; done
           # ssh is denied unless a scenario asks for it (ADR 0003)
           jq -e ".permissions.deny | index(\"Bash(ssh:*)\")" surfaces/claims-cli.json >/dev/null
           echo "image ok"'

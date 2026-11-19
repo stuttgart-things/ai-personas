@@ -60,12 +60,57 @@ out.push(`# Lauf ${run}`, '');
 const dur = result.duration_ms != null ? `${Math.round(result.duration_ms / 1000)} s` : '';
 const rows = [
   ['Persona', summary.persona], ['Szenario', summary.scenario], ['Lab', process.env.LAB || summary.lab],
+  ['Merge', summary.merge === 'auto' ? 'auto (Bestelldienst, ADR 0004)' : summary.merge],
   ['Modell', init.model], ['Claude Code', init.claude_code_version],
   ['Start', t0 ? new Date(t0).toISOString().replace('.000', '') : ''], ['Dauer', dur],
   ['Turns', result.num_turns], ['Kosten', result.total_cost_usd != null ? `${result.total_cost_usd.toFixed(2)} USD` : ''],
   ['Ergebnis', result.subtype ? `${result.subtype}${result.is_error ? ' (Fehler)' : ''}` : 'kein Ergebnis (abgebrochen?)'],
 ].filter(([, v]) => v !== undefined && v !== null && v !== '');
 out.push('| | |', '|---|---|', ...rows.map(([k, v]) => `| ${k} | ${String(v).replace(/\|/g, '\\|')} |`), '');
+
+// Overview: every command with start, duration and result, one line each.
+const tools = [];
+for (const e of events) {
+  if (e.type !== 'assistant' || !e.message || !Array.isArray(e.message.content)) continue;
+  for (const c of e.message.content) if (c.type === 'tool_use') tools.push({ c, t: e.timestamp });
+}
+const secs = (a, b) => (a && b ? Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 1000)) : null);
+const fmtDur = (s) => (s == null ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} min`);
+const cell = (s) => String(s).replace(/\s+/g, ' ').replace(/\|/g, '\\|').replace(/`/g, "'");
+const oneLine = (s, max = 110) => { const t = cell(s).trim(); return t.length > max ? t.slice(0, max) + ' …' : t; };
+out.push('## Befehle', '');
+if (tools.length) {
+  out.push('| # | Start | Dauer | Befehl | Ergebnis |', '|---|---|---|---|---|');
+  tools.forEach(({ c, t }, i) => {
+    const r = results.get(c.id);
+    const cmd = (c.input && c.input.command) || JSON.stringify(c.input || {});
+    const status = !r ? 'keine Antwort' : r.err ? 'Fehler' : 'ok';
+    out.push(`| ${i + 1} | ${rel(t)} | ${fmtDur(secs(t, r && r.t))} | \`${oneLine(cmd)}\` | ${status} |`);
+  });
+  out.push('');
+} else out.push('_Keine Kommandos._', '');
+
+// The order's phases as claims printed them (claims orders watch / --wait).
+const PHASE = /^(\d\d:\d\d:\d\d)\s+(Pending|Ordered|Placed|PROpen|Merged|Applied|Building|Ready|Deleted|Cancelled|Failed)\b\s*(.*)$/;
+const phases = [];
+for (const { c } of tools) {
+  const r = results.get(c.id);
+  if (!r) continue;
+  for (const l of r.out.split('\n')) {
+    const m = l.trim().match(PHASE);
+    if (m && !phases.some((p) => p.time === m[1] && p.phase === m[2])) phases.push({ time: m[1], phase: m[2], msg: m[3] });
+  }
+}
+if (phases.length) {
+  out.push('## Zeitablauf der Bestellung', '', '| Zeit (UTC) | Phase | seit vorher | Meldung |', '|---|---|---|---|');
+  const toS = (h) => { const [a, b, c2] = h.split(':').map(Number); return a * 3600 + b * 60 + c2; };
+  phases.forEach((p, i) => {
+    const d = i ? fmtDur((toS(p.time) - toS(phases[i - 1].time) + 86400) % 86400) : '';
+    out.push(`| ${p.time} | ${p.phase} | ${d} | ${oneLine(p.msg, 140)} |`);
+  });
+  const total = (toS(phases[phases.length - 1].time) - toS(phases[0].time) + 86400) % 86400;
+  out.push('', `Von ${phases[0].phase} bis ${phases[phases.length - 1].phase}: ${fmtDur(total)}.`, '');
+}
 
 out.push('## Verlauf', '');
 let n = 0;

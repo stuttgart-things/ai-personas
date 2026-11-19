@@ -1,9 +1,11 @@
-# Bestellen, nach dem Merge per SSH prüfen (ADR 0003). Der Merge kommt von
-# einem Menschen; das Zertifikat gilt 30 Minuten ab Start des Laufs.
+# Bestellen, nach dem Merge per SSH prüfen (ADR 0003). merge: human (ADR
+# 0004): den Pull Request merged ein Mensch während des Laufs; das Zertifikat
+# gilt 30 Minuten ab Start. In einem Rutsch: verify-vm-ssh-auto.
 name: verify-vm-ssh
 personas: [developer]
 labs: [labul]
 capabilities: [ssh]
+merge: human
 goal: >
   Du brauchst eine kleine Ubuntu-VM namens persona-ssh-check für einen kurzen
   Test. Bestell sie, warte, bis sie fertig ist (den Pull Request merged ein

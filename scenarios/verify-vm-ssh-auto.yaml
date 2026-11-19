@@ -1,0 +1,24 @@
+# Wie verify-vm-ssh, aber in einem Rutsch: Der Bestelldienst merged den Pull
+# Request selbst, sobald die Checks grün sind (ADR 0004,
+# machinery-order-service ADR 0002). Braucht eine Auto-Merge-Regel für die
+# Gruppe der Persona auf dem Management-Cluster, sonst lehnt der Dienst die
+# Bestellung ab (403), und genau das soll die Persona dann melden.
+name: verify-vm-ssh-auto
+personas: [developer]
+labs: [labul]
+capabilities: [ssh]
+merge: auto
+goal: >
+  Du brauchst eine kleine Ubuntu-VM namens persona-ssh-auto für einen kurzen
+  Test. Bestell sie so, dass sie ohne Review gebaut wird, warte, bis sie fertig
+  ist, melde dich dann auf ihr an und prüf, ob sie wirklich Ubuntu ist und wie
+  viele CPUs und wie viel Speicher sie hat. Sag am Ende, was du bestellt hast,
+  wer den Pull Request gemerged hat und was du auf der VM gesehen hast.
+expect:
+  - verifier: order-pr
+  - verifier: auto-merged     # der PR wurde vom Bestelldienst gemerged
+  - verifier: xr-ready
+    timeout: 20m
+  - verifier: ssh-login       # die Antwort nennt OS, CPUs und Speicher der VM
+cleanup: delete-claim
+ttl: 1h
