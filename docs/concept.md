@@ -102,7 +102,7 @@ Ein Lauf ist ein Container mit `claude` und `claims`, gestartet mit genau einem 
 | claim-machinery-api, `POST /api/v1/claim-templates/{name}/order-pr` | auf beiden machinery-Clustern aus: kein Dispatch konfiguriert (GitHub App mit `actions:write` fehlt) | später |
 | `claims render --create-pr` | erstellt den PR selbst per Git-Push, braucht `--git-token` | nein |
 
-Die claims-CLI (v0.27.0) kann Client Credentials (`--api-oidc-client-id`, `--api-oidc-client-secret`, `--api-oidc-token-url`, `--api-oidc-scope` bzw. `$CLAIM_API_OIDC_*`). Im Pilot nimmt die Persona `claims` zum Ansehen und Rendern der Templates und `curl` für die Bestellung bei machinery-order-service. Später soll `claims order` (stuttgart-things/claims#124) das ersetzen.
+Die claims-CLI kann Client Credentials (`--api-oidc-client-id`, `--api-oidc-client-secret`, `--api-oidc-token-url`, `--api-oidc-scope` bzw. `$CLAIM_API_OIDC_*`). Im Pilot nahm die Persona `claims` zum Ansehen und Rendern der Templates und `curl` für die Bestellung bei machinery-order-service. Seit v0.28.0 bestellt sie mit `claims order` und verfolgt die Bestellung mit `claims orders` (stuttgart-things/claims#124, ADR 0001).
 
 **Der Aufruf** (`runner/run.sh`, Flags aus `claude --help`):
 
