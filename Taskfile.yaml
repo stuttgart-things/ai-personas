@@ -84,3 +84,8 @@ tasks:
     desc: Render transcript.md for a run directory (also older runs), e.g. task report RUN=runs/<run-id>
     cmds:
       - node runner/report {{.RUN}}
+
+  publish:
+    desc: File a run's report in the private runs repo (ADR 0005; run.sh does it when the lab names runsRepo), e.g. task publish RUN=runs/<run-id> REPO=owner/repo
+    cmds:
+      - runner/publish-run {{.RUN}} {{.REPO}}
