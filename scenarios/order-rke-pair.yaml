@@ -1,0 +1,25 @@
+# Zwei VMs für einen Cluster-Test in einem Rutsch: Die Persona bestellt beide
+# mit Auto-Merge (ADR 0004), wartet, bis beide fertig sind, und prüft den
+# Login. Die VMs bleiben stehen: Auf ihnen läuft danach ein Test, den nicht die
+# Persona fährt (z. B. deploy-configure-rke, RKE2 Server + Agent). Abgeräumt
+# wird danach von Hand.
+name: order-rke-pair
+personas: [developer]
+labs: [labul]
+capabilities: [ssh]
+merge: auto
+goal: >
+  Du brauchst zwei kleine Ubuntu-VMs für einen Kubernetes-Test, eine namens
+  persona-rke-srv und eine namens persona-rke-agt. Bestell beide so, dass sie
+  ohne Review gebaut werden, warte, bis beide fertig sind, und melde dich auf
+  beiden an. Prüf dabei, ob sie Ubuntu sind, wie viele CPUs und wie viel
+  Speicher sie haben und ob sie sich gegenseitig erreichen. Lass die VMs
+  stehen. Nenn am Ende für jede VM Name, Adresse und Bestell-ID.
+expect:
+  - verifier: order-pr
+  - verifier: auto-merged
+  - verifier: xr-ready
+    timeout: 20m
+  - verifier: ssh-login
+cleanup: none
+ttl: 3h
