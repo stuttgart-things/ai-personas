@@ -9,15 +9,25 @@ id=$(basename "$dir")
 [ -s "$dir/summary.json" ] || { echo "publish-run: $dir has no summary.json" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 
+# runs/<scenario>/<yyyy-mm-ddThh-mm>-<persona>: one folder per scenario, its
+# runs sorted by time below it. The run id's trailing -<scenario> is dropped,
+# because the folder already names it.
+dest_of() {
+  local scenario name
+  scenario=$(jq -r '.scenario // "unknown"' "$1")
+  name=${2%-"$scenario"}
+  echo "runs/$scenario/$name"
+}
+
 for attempt in 1 2 3; do
   tmp=$(mktemp -d)
   git clone -q --depth 1 "https://github.com/$repo.git" "$tmp/r"
-  dest=runs/${id:0:7}/$id                       # runs/2026-11/<run id>
+  dest=$(dest_of "$dir/summary.json" "$id")   # runs/<scenario>/<time>-<persona>
   mkdir -p "$tmp/r/$dest"
   for f in transcript.md transcript.jsonl summary.json friction.txt; do
     [ -f "$dir/$f" ] && cp "$dir/$f" "$tmp/r/$dest/"
   done
-  "$here/runs-index" "$tmp/r" > "$tmp/r/README.md"
+  "$here/runs-index" "$tmp/r"
   git -C "$tmp/r" add -A
   if git -C "$tmp/r" diff --cached --quiet; then
     echo "publish-run: $id unchanged in $repo"; rm -rf "$tmp"; exit 0

@@ -10,7 +10,8 @@ Jeder Lauf erzeugt `transcript.md`, `transcript.jsonl`, `summary.json` und `fric
 ## Entscheidung
 
 - Die Reports landen in einem **privaten Repo**, das die Lab-Bindung im privaten Flotten-Repo nennt (`runsRepo`). Im öffentlichen Repo steht kein Name.
-- Ablage: `runs/<yyyy-mm>/<run-id>/` mit den vier Dateien. Die `README.md` des Repos ist ein generierter Index mit Persona, Szenario, Lab, Merge, Ergebnis, Turns, Kosten und Anzahl der Friction-Zeilen, die neuesten oben.
+- Ablage: `runs/<szenario>/<yyyy-mm-ddThh-mm>-<persona>/` mit den vier Dateien, also ein Ordner pro Szenario und darunter die Läufe nach Zeit. So liegen die Läufe beieinander, die man vergleichen will. Die `README.md` des Repos ist ein generierter Index mit Persona, Szenario, Lab, Merge, Ergebnis, Turns, Kosten und Anzahl der Friction-Zeilen, die neuesten oben. Jeder Szenario-Ordner hat einen eigenen Index mit nur seinen Läufen.
+  (Bis 2026-11-19 lag alles unter `runs/<yyyy-mm>/<run-id>/`. Die fünf Läufe bis dahin wurden umgezogen.)
 - `run.sh` legt den Report nach dem Lauf ab (`runner/publish-run`), mit den Git-Zugangsdaten des Hosts oder der CI. Die Persona sieht diese Zugangsdaten nie. Den Container gibt es zu dem Zeitpunkt nicht mehr.
 - Abgelegt wird nur, was die Leak-Prüfung bestanden hat. Ein Lauf, in dessen Ausgabe ein Token oder der SSH-Schlüssel auftaucht, bricht vorher ab und löscht seine Ausgabe.
 - Die Reports werden direkt auf `main` des Runs-Repos geschrieben, ohne PR. Das Repo enthält nur generierte Daten, und Reviews hätten dort keinen Nutzen. Läuft gleichzeitig ein anderer Lauf, wird neu geklont und noch einmal versucht.
