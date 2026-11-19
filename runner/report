@@ -101,6 +101,27 @@ for (const { c } of tools) {
     if (m && !phases.some((p) => p.time === m[1] && p.phase === m[2])) phases.push({ time: m[1], phase: m[2], msg: m[3] });
   }
 }
+// With -o json claims prints the order instead: take status.history.
+const hhmmss = (t) => new Date(t).toISOString().slice(11, 19);
+const histories = (v) => {
+  if (!v || typeof v !== 'object') return [];
+  if (Array.isArray(v)) return v.flatMap(histories);
+  const h = v.status && Array.isArray(v.status.history) ? [v.status.history] : [];
+  return h.concat(Object.values(v).flatMap(histories));
+};
+for (const { c } of tools) {
+  const r = results.get(c.id);
+  if (!r || !/"history"/.test(r.out)) continue;
+  let v; try { v = JSON.parse(r.out); } catch { continue; }
+  for (const h of histories(v)) {
+    for (const e of h) {
+      if (!e || !e.phase || !e.time || isNaN(Date.parse(e.time))) continue;
+      const time = hhmmss(e.time);
+      if (!phases.some((p) => p.time === time && p.phase === e.phase)) phases.push({ time, phase: e.phase, msg: e.message || '' });
+    }
+  }
+}
+phases.sort((a, b) => a.time.localeCompare(b.time));
 if (phases.length) {
   out.push('## Zeitablauf der Bestellung', '', '| Zeit (UTC) | Phase | seit vorher | Meldung |', '|---|---|---|---|');
   const toS = (h) => { const [a, b, c2] = h.split(':').map(Number); return a * 3600 + b * 60 + c2; };
