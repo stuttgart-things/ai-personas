@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Prints README.md of the runs repository: one row per run, newest first,
+# from every runs/*/*/summary.json. usage: runner/runs-index <repo dir>
+set -euo pipefail
+root=${1:?repo dir}
+cat <<'HEAD'
+# AI persona runs
+
+Reports of the persona test runs ([stuttgart-things/ai-personas](https://github.com/stuttgart-things/ai-personas), ADR 0005). Each run has `transcript.md` (readable: commands with start and duration, the order's timeline, output, friction), `transcript.jsonl` (raw), `summary.json` and `friction.txt`. Written by `runner/publish-run`; this index is generated, do not edit. *Goal* is the persona's own verdict ("Ziel erreicht: ja / teilweise / nein"); *Claude* is whether the claude run itself finished.
+
+| Run | Persona | Scenario | Lab | Merge | Goal | Claude | Turns | Cost | Friction |
+|---|---|---|---|---|---|---|---|---|---|
+HEAD
+find "$root/runs" -name summary.json 2>/dev/null | sort -r | while read -r s; do
+  d=$(dirname "$s"); rel=${d#"$root"/}
+  fr=0; [ -f "$d/friction.txt" ] && fr=$(grep -vc '^FRICTION: keine' "$d/friction.txt" || true)
+  jq -r --arg rel "$rel" --arg fr "$fr" '
+    "| [\(.run)](\($rel)/transcript.md) | \(.persona) | \(.scenario) | \(.lab // "") | \(.merge // "human") | " +
+    "\(((.result.result // "") | capture("(?i)ziel erreicht:?\\**:?\\s*(?<g>ja|nein|teilweise)") | .g | ascii_downcase) // "?") | " +
+    "\(.result.subtype // "–")\(if .result.is_error then " (error)" else "" end) | \(.result.num_turns // "") | " +
+    "\(if .result.total_cost_usd then "\((.result.total_cost_usd * 100 | round) / 100) USD" else "" end) | \($fr) |"' "$s"
+done

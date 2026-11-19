@@ -9,8 +9,9 @@
 #   orderApiUrl: https://...
 #   caFile: path/to/root-ca.pem   # relative to the fleet repo root
 #   sshCaMount: ssh-client-signer # Vault SSH CA (ADR 0003), role persona-<persona>
+#   runsRepo: owner/repo          # private repo the reports go to (ADR 0005)
 # or the same as environment: LAB, CLAIM_API_URL, ORDER_API_URL, CA_FILE,
-# SSH_CA_MOUNT.
+# SSH_CA_MOUNT, RUNS_REPO. Without a runs repo the report stays in OUT_DIR.
 #
 # Credentials (environment, never in a file here):
 #   VAULT_ADDR, VAULT_TOKEN  read access to ai-personas/<lab>/<persona>; for
@@ -28,6 +29,7 @@ if [ -n "${LAB_FILE:-}" ]; then
   ORDER_API_URL=$(yq -r .orderApiUrl "$LAB_FILE")
   ca=$(yq -r '.caFile // ""' "$LAB_FILE"); [ -n "$ca" ] && CA_FILE=$root/$ca
   SSH_CA_MOUNT=$(yq -r '.sshCaMount // ""' "$LAB_FILE")
+  RUNS_REPO=${RUNS_REPO:-$(yq -r '.runsRepo // ""' "$LAB_FILE")}
 fi
 : "${LAB:?LAB}" "${CLAIM_API_URL:?CLAIM_API_URL}" "${ORDER_API_URL:?ORDER_API_URL}"
 [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ] \
@@ -36,6 +38,7 @@ export LAB CLAIM_API_URL
 export CLAIM_ORDERS_URL=$ORDER_API_URL
 image=${IMAGE:-ai-personas-runner:local}
 out=${OUT_DIR:-$PWD/runs}; mkdir -p "$out"
+export RUN_ID=${RUN_ID:-$(date -u +%Y-%m-%dT%H-%M)-$persona-$scenario}
 
 cacurl=(); camount=()
 if [ -n "${CA_FILE:-}" ]; then
@@ -74,3 +77,10 @@ envs=(--user "$(id -u):$(id -g)" -e HOME=/tmp/persona-home -e PERSONA_TOKEN -e C
 [ -n "${ANTHROPIC_API_KEY:-}" ] && envs+=(-e ANTHROPIC_API_KEY)
 PERSONA_TOKEN=$token docker run --rm "${envs[@]}" "${camount[@]}" "${sshmount[@]}" \
   -v "$out:/out" "$image" "$persona" "$scenario"
+
+# The report into the private runs repo (ADR 0005), with the host's git
+# credentials. Only reached when the run passed its leak check (the
+# container fails otherwise). A failed push keeps the local copy.
+if [ -n "${RUNS_REPO:-}" ]; then
+  "$here/runner/publish-run" "$out/$RUN_ID" "$RUNS_REPO" || echo "report not published, kept in $out/$RUN_ID" >&2
+fi
