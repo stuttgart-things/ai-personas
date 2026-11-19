@@ -61,6 +61,13 @@ tasks:
           -c 'mkdir -p /out/probe "$HOME" && touch /out/probe/ok && js-yaml --version >/dev/null && claude --version >/dev/null'
         test -f "$out/probe/ok" || { echo "output dir not writable as the caller"; exit 1; }
         rm -rf "$out"; echo "output mount ok"
+      - |
+        # ssh as a uid the image does not know, as run.sh starts it
+        docker run --rm --user 54321:54321 -e HOME=/tmp/persona-home --entrypoint bash {{.IMAGE}} -euo pipefail -c '
+          mkdir -p "$HOME"; . /usr/local/lib/persona-nss-user
+          ssh -G -l sthings example.invalid | grep -q "^user sthings" || { echo "ssh fails for an unknown uid"; exit 1; }
+          echo "ssh as unknown uid ok"'
+
 
   shell:
     desc: Open a shell in the persona's environment (Dagger terminal) to see what it sees
