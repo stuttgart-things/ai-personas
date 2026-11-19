@@ -46,6 +46,13 @@ fi
 surface=$(yaml "$pdir/persona.yaml" .surface)
 budget=$(yaml "$pdir/persona.yaml" .budget.usd)
 goal=$(yaml "$sfile" .goal)
+# Who merges the order's pull request (ADR 0004): a human (default), or the
+# order service itself once the checks pass, where its rules allow it.
+merge=$(yaml "$sfile" '.merge // "human"')
+case $merge in
+  human|auto) ;;
+  *) echo "scenario $scenario: merge must be human or auto, not $merge" >&2; exit 2 ;;
+esac
 run_id=${RUN_ID:-$(date -u +%Y-%m-%dT%H-%M)-$persona-$scenario}
 out=${OUT_DIR:-/out}/$run_id
 mkdir -p "$out"
@@ -57,6 +64,9 @@ export CLAIM_API_TOKEN=$PERSONA_TOKEN
 settings=$base/surfaces/$surface.json
 allowed=("Bash(claims:*)")
 context="Dein Werkzeug ist \`claims\`, schon mit deinem Login eingerichtet."
+if [ "$merge" = auto ]; then
+  context="$context Für diese Test-Bestellung brauchst du kein Review: Mit \`claims order … --auto-merge\` merged der Bestelldienst den Pull Request selbst, sobald die Checks grün sind."
+fi
 
 # SSH only where the scenario asks for it, and only with a certificate.
 sshkey=
@@ -92,9 +102,9 @@ $context" \
 # Friction lines from the persona's own text, whole (quotes and all).
 jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' \
   "$out/transcript.jsonl" | grep -oE 'FRICTION: .*' | sort -u > "$out/friction.txt" || true
-jq -s '{run: $run, persona: $p, scenario: $s, lab: $lab,
+jq -s '{run: $run, persona: $p, scenario: $s, lab: $lab, merge: $merge, merge: $merge,
         result: (map(select(.type=="result")) | last | {subtype, is_error, num_turns, total_cost_usd, result})}' \
-  --arg run "$run_id" --arg p "$persona" --arg s "$scenario" --arg lab "${LAB:-}" \
+  --arg run "$run_id" --arg p "$persona" --arg s "$scenario" --arg lab "${LAB:-}" --arg merge "$merge" \
   "$out/transcript.jsonl" > "$out/summary.json" || true
 persona-report "$out" >/dev/null || echo "persona-report failed" >&2
 

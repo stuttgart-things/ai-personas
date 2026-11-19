@@ -40,7 +40,7 @@ tasks:
           done
           cd /opt/ai-personas
           for p in personas/*/persona.yaml; do js-yaml "$p" | jq -e ".surface and .budget.usd" >/dev/null; done
-          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal" >/dev/null; done
+          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal and ((.merge // \"human\") | IN(\"human\", \"auto\"))" >/dev/null || { echo "bad scenario $s"; exit 1; }; done
           # ssh is denied unless a scenario asks for it (ADR 0003)
           jq -e ".permissions.deny | index(\"Bash(ssh:*)\")" surfaces/claims-cli.json >/dev/null
           echo "image ok"'
