@@ -1,0 +1,19 @@
+# Bestellen, nach dem Merge per SSH prüfen (ADR 0003). Der Merge kommt von
+# einem Menschen; das Zertifikat gilt 30 Minuten ab Start des Laufs.
+name: verify-vm-ssh
+personas: [developer]
+labs: [labul]
+capabilities: [ssh]
+goal: >
+  Du brauchst eine kleine Ubuntu-VM namens persona-ssh-check für einen kurzen
+  Test. Bestell sie, warte, bis sie fertig ist (den Pull Request merged ein
+  Kollege), melde dich dann auf ihr an und prüf, ob sie wirklich Ubuntu ist und
+  wie viele CPUs und wie viel Speicher sie hat. Sag am Ende, was du bestellt
+  hast und was du auf der VM gesehen hast.
+expect:
+  - verifier: order-pr
+  - verifier: xr-ready
+    timeout: 20m
+  - verifier: ssh-login       # die Antwort nennt OS, CPUs und Speicher der VM
+cleanup: delete-claim
+ttl: 1h

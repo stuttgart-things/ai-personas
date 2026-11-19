@@ -1,0 +1,127 @@
+#!/usr/bin/env node
+// persona-report <run dir>: renders <run dir>/transcript.jsonl (claude -p
+// --output-format stream-json) into <run dir>/transcript.md, a document a
+// human can follow end to end (ADR 0002): header, chronological text and
+// commands with their output, friction, denied tool calls.
+// Reads summary.json and friction.txt next to it when present. Writes
+// nothing but transcript.md; the runner's leak check covers it afterwards.
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const dir = process.argv[2];
+if (!dir) { console.error('usage: persona-report <run dir>'); process.exit(2); }
+const src = path.join(dir, 'transcript.jsonl');
+const lines = fs.readFileSync(src, 'utf8').split('\n').filter(Boolean);
+const events = [];
+for (const l of lines) { try { events.push(JSON.parse(l)); } catch { /* partial line */ } }
+
+const readOpt = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } };
+let summary = {};
+try { summary = JSON.parse(readOpt('summary.json') || '{}'); } catch { summary = {}; }
+const friction = readOpt('friction.txt').split('\n').map((s) => s.trim()).filter(Boolean);
+
+const MAX_OUT = 40;       // lines of a command's output shown
+const MAX_LINE = 300;     // characters per output line
+const fence = (s) => { // a fence longer than any backtick run inside
+  const runs = (s.match(/`+/g) || []).map((r) => r.length);
+  return '`'.repeat(Math.max(3, ...runs.map((n) => n + 1)));
+};
+const block = (s, lang = '') => { const f = fence(s); return `${f}${lang}\n${s}\n${f}`; };
+const clip = (s) => {
+  const ls = String(s).replace(/\r/g, '').split('\n').map((l) => (l.length > MAX_LINE ? l.slice(0, MAX_LINE) + ' …' : l));
+  if (ls.length <= MAX_OUT) return ls.join('\n').replace(/\n+$/, '');
+  return ls.slice(0, MAX_OUT).join('\n') + `\n… (${ls.length - MAX_OUT} more lines in transcript.jsonl)`;
+};
+const text = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x.text || '').join('\n') : '');
+
+const init = events.find((e) => e.type === 'system' && e.subtype === 'init') || {};
+const result = [...events].reverse().find((e) => e.type === 'result') || {};
+const stamps = events.map((e) => e.timestamp).filter(Boolean).map((t) => Date.parse(t)).filter((n) => !isNaN(n));
+const t0 = stamps.length ? Math.min(...stamps) : null;
+const rel = (t) => {
+  if (!t0 || !t) return '';
+  const s = Math.max(0, Math.round((Date.parse(t) - t0) / 1000));
+  return `+${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+// tool_use id -> result
+const results = new Map();
+for (const e of events) {
+  if (e.type !== 'user' || !e.message || !Array.isArray(e.message.content)) continue;
+  for (const c of e.message.content) {
+    if (c.type === 'tool_result') results.set(c.tool_use_id, { out: text(c.content), err: !!c.is_error, t: e.timestamp });
+  }
+}
+
+const out = [];
+const run = summary.run || path.basename(path.resolve(dir));
+out.push(`# Lauf ${run}`, '');
+const dur = result.duration_ms != null ? `${Math.round(result.duration_ms / 1000)} s` : '';
+const rows = [
+  ['Persona', summary.persona], ['Szenario', summary.scenario], ['Lab', process.env.LAB || summary.lab],
+  ['Modell', init.model], ['Claude Code', init.claude_code_version],
+  ['Start', t0 ? new Date(t0).toISOString().replace('.000', '') : ''], ['Dauer', dur],
+  ['Turns', result.num_turns], ['Kosten', result.total_cost_usd != null ? `${result.total_cost_usd.toFixed(2)} USD` : ''],
+  ['Ergebnis', result.subtype ? `${result.subtype}${result.is_error ? ' (Fehler)' : ''}` : 'kein Ergebnis (abgebrochen?)'],
+].filter(([, v]) => v !== undefined && v !== null && v !== '');
+out.push('| | |', '|---|---|', ...rows.map(([k, v]) => `| ${k} | ${String(v).replace(/\|/g, '\\|')} |`), '');
+
+out.push('## Verlauf', '');
+let n = 0;
+for (const e of events) {
+  if (e.type !== 'assistant' || !e.message || !Array.isArray(e.message.content)) continue;
+  for (const c of e.message.content) {
+    if (c.type === 'text' && c.text.trim()) {
+      out.push(`**${rel(e.timestamp)} Persona:** ${c.text.trim()}`, '');
+    } else if (c.type === 'tool_use') {
+      n++;
+      const input = c.input || {};
+      const cmd = input.command || JSON.stringify(input);
+      const r = results.get(c.id);
+      const status = !r ? 'keine Antwort' : r.err ? 'Fehler' : 'ok';
+      out.push(`### ${n}. \`${c.name}\` ${rel(e.timestamp)}${input.description ? ` · ${input.description}` : ''}`, '');
+      out.push(block(cmd, c.name === 'Bash' ? 'bash' : ''), '');
+      out.push(`→ ${status}`, '');
+      if (r && r.out.trim()) out.push(block(clip(r.out)), '');
+    }
+  }
+}
+if (n === 0) out.push('_Keine Kommandos._', '');
+
+if (result.result) out.push('## Antwort der Persona', '', result.result.trim(), '');
+
+out.push('## Friction', '');
+out.push(...(friction.length ? friction.map((f) => `- ${f.replace(/^FRICTION:\s*/, '')}`) : ['_Keine Friction-Zeilen._']), '');
+
+const denied = result.permission_denials || [];
+out.push('## Abgelehnte Tool-Aufrufe', '');
+if (denied.length) {
+  for (const d of denied) {
+    out.push(`- \`${d.tool_name}\`:`, '', block(clip(d.tool_input && d.tool_input.command ? d.tool_input.command : JSON.stringify(d.tool_input || {}))), '');
+  }
+} else out.push('_Keine._');
+out.push('');
+
+// What the run created: output of ordering commands, and the final answer.
+// Listings (claims orders list) name other people's orders too, so they do
+// not count.
+const ORDERING = /\bclaims\s+order\s|\borders\s+create\s|--create-pr/;
+const all = [];
+for (const e of events) {
+  if (e.type !== 'assistant' || !e.message || !Array.isArray(e.message.content)) continue;
+  for (const c of e.message.content) {
+    if (c.type === 'tool_use' && ORDERING.test((c.input && c.input.command) || '') && results.has(c.id)) all.push(results.get(c.id).out);
+  }
+}
+all.push(result.result || '');
+const found = (re) => [...new Set(all.flatMap((s) => s.match(re) || []))];
+const orders = found(/\bord-[0-9a-f]{12}\b/g);
+const prs = found(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g);
+out.push('## Entstanden', '');
+out.push(`- Bestellungen: ${orders.length ? orders.map((o) => `\`${o}\``).join(', ') : '–'}`);
+out.push(`- Pull Requests: ${prs.length ? prs.join(', ') : '–'}`, '');
+out.push('---', 'Erzeugt von `persona-report` aus `transcript.jsonl` (ADR 0002). Ausgaben gekürzt; vollständig im JSONL.', '');
+
+fs.writeFileSync(path.join(dir, 'transcript.md'), out.join('\n'));
+console.log(path.join(dir, 'transcript.md'));

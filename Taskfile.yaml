@@ -32,13 +32,17 @@ tasks:
       - |
         docker run --rm --entrypoint bash {{.IMAGE}} -euo pipefail -c '
           [ "$(id -u)" = 10001 ] || { echo "not running as persona"; exit 1; }
-          claude --version; claims version | head -1; js-yaml --version
-          for t in kubectl gh git vault ssh; do
+          claude --version; claims version | head -1; js-yaml --version; ssh -V
+          claims order --help | grep -q -- "--cluster" || { echo "claims has no order command"; exit 1; }
+          test -x /usr/local/bin/persona-report || { echo "persona-report missing"; exit 1; }
+          for t in kubectl gh git vault orders; do
             if command -v "$t" >/dev/null; then echo "forbidden tool: $t"; exit 1; fi
           done
           cd /opt/ai-personas
           for p in personas/*/persona.yaml; do js-yaml "$p" | jq -e ".surface and .budget.usd" >/dev/null; done
           for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal" >/dev/null; done
+          # ssh is denied unless a scenario asks for it (ADR 0003)
+          jq -e ".permissions.deny | index(\"Bash(ssh:*)\")" surfaces/claims-cli.json >/dev/null
           echo "image ok"'
       - |
         set +e
@@ -48,6 +52,8 @@ tasks:
         [ $rc -eq 2 ] || { echo "unknown persona: exit $rc, want 2"; exit 1; }
         docker run --rm -e PERSONA_TOKEN=x {{.IMAGE}} {{.PERSONA}} {{.SCENARIO}} >/dev/null 2>&1; rc=$?
         [ $rc -eq 1 ] || { echo "without claude credentials: exit $rc, want 1"; exit 1; }
+        docker run --rm -e PERSONA_TOKEN=x -e ANTHROPIC_API_KEY=x {{.IMAGE}} {{.PERSONA}} verify-vm-ssh >/dev/null 2>&1; rc=$?
+        [ $rc -eq 2 ] || { echo "ssh scenario without certificate: exit $rc, want 2"; exit 1; }
         echo "entrypoint guards ok"
       - |
         out=$(mktemp -d)
@@ -66,3 +72,8 @@ tasks:
     desc: One persona run (needs LAB_FILE or LAB/CLAIM_API_URL/ORDER_API_URL, VAULT_ADDR, VAULT_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY), e.g. task run PERSONA=developer SCENARIO=order-baseos-vm
     cmds:
       - IMAGE={{.IMAGE}} runner/run.sh {{.PERSONA}} {{.SCENARIO}}
+
+  report:
+    desc: Render transcript.md for a run directory (also older runs), e.g. task report RUN=runs/<run-id>
+    cmds:
+      - node runner/report {{.RUN}}

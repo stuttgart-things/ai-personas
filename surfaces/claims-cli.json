@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "allow": ["Bash(claims:*)", "Bash(orders:*)"],
+    "allow": ["Bash(claims:*)"],
     "deny": [
       "Bash(kubectl:*)",
       "Bash(gh:*)",
