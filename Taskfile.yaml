@@ -33,7 +33,7 @@ tasks:
         docker run --rm --entrypoint bash {{.IMAGE}} -euo pipefail -c '
           [ "$(id -u)" = 10001 ] || { echo "not running as persona"; exit 1; }
           claude --version; claims version | head -1; js-yaml --version; ssh -V
-          claims order --help | grep -q -- "--cluster" || { echo "claims has no order command"; exit 1; }
+          claims order --help | grep -q -- "--auto-merge" || { echo "claims has no order --auto-merge"; exit 1; }
           test -x /usr/local/bin/persona-report || { echo "persona-report missing"; exit 1; }
           for t in kubectl gh git vault orders; do
             if command -v "$t" >/dev/null; then echo "forbidden tool: $t"; exit 1; fi
