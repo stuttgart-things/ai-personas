@@ -60,6 +60,7 @@ context="Dein Werkzeug ist \`claims\`, schon mit deinem Login eingerichtet."
 
 # SSH only where the scenario asks for it, and only with a certificate.
 sshkey=
+. /usr/local/lib/persona-nss-user
 if has_cap ssh; then
   if [ -s /run/persona-ssh/id_ed25519 ] && [ -s /run/persona-ssh/id_ed25519-cert.pub ]; then
     mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
@@ -88,7 +89,9 @@ $context" \
   --output-format stream-json --verbose \
   > "$out/transcript.jsonl" || echo "claude exited with $?" >&2
 
-grep -ohE 'FRICTION: [^"\\]*' "$out/transcript.jsonl" | sort -u > "$out/friction.txt" || true
+# Friction lines from the persona's own text, whole (quotes and all).
+jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' \
+  "$out/transcript.jsonl" | grep -oE 'FRICTION: .*' | sort -u > "$out/friction.txt" || true
 jq -s '{run: $run, persona: $p, scenario: $s, lab: $lab,
         result: (map(select(.type=="result")) | last | {subtype, is_error, num_turns, total_cost_usd, result})}' \
   --arg run "$run_id" --arg p "$persona" --arg s "$scenario" --arg lab "${LAB:-}" \

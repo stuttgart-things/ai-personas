@@ -1,0 +1,13 @@
+# Sourced by persona-run (and the smoke test). run.sh starts the container
+# as the caller's uid so /out stays writable for them; the image has no
+# passwd entry for that uid, and ssh refuses to start without one ("No user
+# exists for uid ..."). nss_wrapper gives the process an entry without
+# touching /etc.
+if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
+  _nss=${HOME:-/tmp}/.nss
+  mkdir -p "$_nss"
+  { cat /etc/passwd; printf 'persona:x:%s:%s:persona:%s:/bin/bash\n' "$(id -u)" "$(id -g)" "${HOME:-/tmp}"; } > "$_nss/passwd"
+  { cat /etc/group; getent group "$(id -g)" >/dev/null || printf 'persona:x:%s:\n' "$(id -g)"; } > "$_nss/group"
+  export LD_PRELOAD=libnss_wrapper.so NSS_WRAPPER_PASSWD=$_nss/passwd NSS_WRAPPER_GROUP=$_nss/group
+  unset _nss
+fi

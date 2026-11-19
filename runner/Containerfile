@@ -14,7 +14,7 @@ ARG JS_YAML_VERSION=4.1.0
 ARG TARGETARCH=amd64
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl jq openssh-client \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq openssh-client libnss-wrapper \
  && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "js-yaml@${JS_YAML_VERSION}" \
@@ -43,6 +43,7 @@ COPY scenarios/ scenarios/
 COPY surfaces/ surfaces/
 COPY runner/entrypoint.sh /usr/local/bin/persona-run
 COPY runner/report /usr/local/bin/persona-report
+COPY runner/nss-user /usr/local/lib/persona-nss-user
 
 USER persona
 WORKDIR /home/persona
