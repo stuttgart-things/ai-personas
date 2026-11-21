@@ -27,6 +27,8 @@ dagger -c 'host | directory . | docker-build --dockerfile runner/Containerfile |
 
 Versions are build args: `CLAUDE_CODE_VERSION`, `CLAIMS_VERSION`, `JS_YAML_VERSION`.
 
+**Published image:** `ghcr.io/stuttgart-things/ai-personas-runner`, built by `.github/workflows/runner-image.yaml` with the stuttgart-things Dagger docker module from this Containerfile. Pull requests build to ttl.sh and run `task smoke` and Trivy; main publishes `:<commit sha>` and `:latest`. Pin the commit sha: the Tekton pipeline (stage-time `execute-persona-run`) takes it as `runnerImage`, and the same sha as `aiPersonasRevision` for `publish-run`.
+
 ## Run
 
 The lab binding (endpoints, Vault, CA) lives in the private fleet repo; this repo names no hosts.
