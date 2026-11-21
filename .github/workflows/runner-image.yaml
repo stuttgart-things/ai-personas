@@ -41,6 +41,7 @@ env:
   IMAGE: stuttgart-things/ai-personas-runner
   REGISTRY: ghcr.io
   DAGGER_VERSION: v0.20.3
+  TASK_VERSION: v3.54.0
 
 jobs:
   build-validate:
@@ -66,10 +67,17 @@ jobs:
             --progress plain
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
 
+      # From the release, checked against its checksums (arduino/setup-task
+      # is not on the org's allowed-actions list).
       - name: Install Task
-        uses: arduino/setup-task@v2
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          base=https://github.com/go-task/task/releases/download/$TASK_VERSION
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/task_linux_amd64.tar.gz"
+          curl -fsSL "$base/task_checksums.txt" | grep ' task_linux_amd64.tar.gz$' | sha256sum -c -
+          tar -xzf task_linux_amd64.tar.gz task
+          sudo install -m 0755 task /usr/local/bin/task
+          task --version
 
       # User, versions, forbidden tools, YAML of personas/scenarios, entrypoint
       # guards; no API key needed.
@@ -133,10 +141,17 @@ jobs:
       - name: Log in to ghcr (smoke test pulls :sha)
         run: echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
 
+      # From the release, checked against its checksums (arduino/setup-task
+      # is not on the org's allowed-actions list).
       - name: Install Task
-        uses: arduino/setup-task@v2
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          base=https://github.com/go-task/task/releases/download/$TASK_VERSION
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/task_linux_amd64.tar.gz"
+          curl -fsSL "$base/task_checksums.txt" | grep ' task_linux_amd64.tar.gz$' | sha256sum -c -
+          tar -xzf task_linux_amd64.tar.gz task
+          sudo install -m 0755 task /usr/local/bin/task
+          task --version
 
       - name: Smoke test
         run: task smoke IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}"
