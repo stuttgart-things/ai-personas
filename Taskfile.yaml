@@ -67,6 +67,14 @@ tasks:
           mkdir -p "$HOME"; . /usr/local/lib/persona-nss-user
           ssh -G -l sthings example.invalid | grep -q "^user sthings" || { echo "ssh fails for an unknown uid"; exit 1; }
           echo "ssh as unknown uid ok"'
+      - |
+        # ssh as the image's persona uid with HOME elsewhere, as the Tekton task
+        # starts it: ssh must read $HOME/.ssh/config, not /home/persona's
+        docker run --rm --user 10001:10001 -e HOME=/tmp/persona-home --entrypoint bash {{.IMAGE}} -euo pipefail -c '
+          mkdir -p "$HOME/.ssh"; printf "Host *\n  User sthings\n" > "$HOME/.ssh/config"
+          . /usr/local/lib/persona-nss-user
+          ssh -G example.invalid | grep -q "^user sthings" || { echo "ssh ignores \$HOME/.ssh/config for uid 10001"; exit 1; }
+          echo "ssh as persona uid with HOME elsewhere ok"'
 
 
   shell:
