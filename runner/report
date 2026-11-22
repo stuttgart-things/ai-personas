@@ -125,8 +125,20 @@ const histories = (v) => {
 };
 for (const { c } of tools) {
   const r = results.get(c.id);
-  if (!r || !/"history"/.test(r.out)) continue;
-  let v; try { v = JSON.parse(r.out); } catch { continue; }
+  if (!r || !/"history"|"phase":/.test(r.out)) continue;
+  // The JSON may come with other output around it (`date; claims … -o json`)
+  // or cut off (`| tail -60`): parse from the first line that opens it, and
+  // else read the history entries one by one (claims prints them with the
+  // keys sorted: message, phase, time).
+  let v;
+  try { v = JSON.parse(r.out); } catch {
+    const at = r.out.search(/^[{[]/m);
+    try { v = at >= 0 ? JSON.parse(r.out.slice(at)) : undefined; } catch { v = undefined; }
+    if (v === undefined) {
+      const re = /\{\s*"message":\s*"((?:[^"\\]|\\.)*)",\s*"phase":\s*"(\w+)",\s*"time":\s*"([^"]+)"\s*\}/g;
+      v = { status: { history: [...r.out.matchAll(re)].map((m) => ({ message: m[1], phase: m[2], time: m[3] })) } };
+    }
+  }
   for (const h of histories(v)) {
     for (const e of h) {
       if (!e || !e.phase || !e.time || isNaN(Date.parse(e.time))) continue;

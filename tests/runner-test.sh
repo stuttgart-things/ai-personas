@@ -68,3 +68,22 @@ node "$report" "$crun" >/dev/null
 grep -q '^| `ord-human0000000` | Ready | teardown | waiting-for-merge | https://github.com/o/fleet/pull/9 |' "$crun/transcript.md" \
   || fail "report cleanup table: $(sed -n '/Aufräumen/,/^---/p' "$crun/transcript.md")"
 echo "report with cleanup ok"
+
+# --- report timeline from mixed and cut JSON output ---------------------------
+mix=$work/mix; mkdir -p "$mix"
+node -e '
+const h = (m, p, t) => `      {\n        "message": "${m}",\n        "phase": "${p}",\n        "time": "2026-11-22T${t}Z"\n      }`;
+const full = `Sun Nov 22 10:00:00 UTC 2026\n{\n  "status": {\n    "history": [\n${[h("accepted","Ordered","10:00:01"), h("x is Ready","Ready","10:09:00")].join(",\n")}\n    ]\n  }\n}`;
+const cut = `        "time": "2026-11-22T10:10:00Z"\n      },\n${h("teardown merged","TearingDown","10:12:00")},\n${h("torn down","Deleted","10:20:00")}\n    ],\n    "live": {`;
+const ev = [];
+[["a", "date; claims order t --wait -o json", full], ["b", "claims orders teardown ord-x -o json | tail -60", cut]].forEach(([id, cmd, out]) => {
+  ev.push({ type: "assistant", timestamp: "2026-11-22T10:00:00Z", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: cmd } }] } });
+  ev.push({ type: "user", timestamp: "2026-11-22T10:00:00Z", message: { content: [{ type: "tool_result", tool_use_id: id, content: out }] } });
+});
+ev.push({ type: "result", subtype: "success", num_turns: 2, total_cost_usd: 0.01, duration_ms: 1000, result: "ok" });
+process.stdout.write(ev.map((e) => JSON.stringify(e)).join("\n") + "\n");' > "$mix/transcript.jsonl"
+node "$report" "$mix" >/dev/null
+for p in Ordered Ready TearingDown Deleted; do
+  grep -qE "^\| [0-9:]{8} \| $p \|" "$mix/transcript.md" || fail "timeline from mixed/cut output lacks $p"
+done
+echo "report timeline from mixed and cut output ok"
