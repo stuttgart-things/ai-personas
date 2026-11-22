@@ -27,4 +27,4 @@ Seit machinery-order-service v0.5.0 (dort ADR 0003) gibt es einen Teardown: `cla
 - `merge: human`-Szenarien hinterlassen einen offenen delete-claim-PR für einen Menschen. Der Report nennt ihn.
 - Ein Lauf dauert länger, im Tekton-Beispiel ist der PipelineRun-Timeout deshalb 2h30m. Das ZITADEL-Token muss das Aufräumen überdauern. ZITADEL gibt Access-Tokens standardmäßig 12 Stunden; für diese Instanz ist das nicht geprüft.
 - Wird der `run`-Pod abgebrochen (Timeout, Node weg), räumt niemand auf, und es entsteht auch kein Report (`publish` läuft nur nach `run`). Das bleibt eine Lücke, bis ein eigener Cleanup-Task im `finally` mit eigenem Token kommt.
-- Offen: Ob der Dapr-Worker des Flotten-Repos jeden grünen `delete-claim/*`-PR merged oder nur die, die er selbst angestoßen hat, ist nicht geprüft (machinery-order-service ADR 0003).
+- Der Dapr-Worker des Flotten-Repos merged nur den Branch, den er selbst beobachtet (eine Instanz je Backstage-Ausführung), nicht jeden grünen `delete-claim/*`-PR (geprüft am 22.11.2026, machinery-order-service ADR 0003). Ein delete-claim-PR des Bestelldienstes wird also nur vom Dienst selbst oder von einem Menschen gemerged.
