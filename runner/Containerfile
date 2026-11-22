@@ -9,7 +9,7 @@
 FROM docker.io/library/node:22-bookworm-slim
 
 ARG CLAUDE_CODE_VERSION=2.1.326
-ARG CLAIMS_VERSION=0.29.1
+ARG CLAIMS_VERSION=0.30.0
 ARG JS_YAML_VERSION=4.1.0
 ARG TARGETARCH=amd64
 
@@ -43,6 +43,8 @@ COPY scenarios/ scenarios/
 COPY surfaces/ surfaces/
 COPY runner/entrypoint.sh /usr/local/bin/persona-run
 COPY runner/report /usr/local/bin/persona-report
+COPY runner/summary /usr/local/bin/persona-summary
+COPY runner/cleanup /usr/local/bin/persona-cleanup
 COPY runner/nss-user /usr/local/lib/persona-nss-user
 
 USER persona

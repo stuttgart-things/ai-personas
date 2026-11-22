@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# A stand-in for claims in tests/runner-test.sh: orders are JSON files in
+# $FAKE_DIR/orders/<id>.json, every call is logged to $FAKE_DIR/calls.
+set -euo pipefail
+d=${FAKE_DIR:?}; echo "$*" >> "$d/calls"
+f() { echo "$d/orders/$1.json"; }
+set_phase() { jq --arg p "$2" '.status.phase = $p' "$(f "$1")" > "$d/tmp" && mv "$d/tmp" "$(f "$1")"; }
+case "$1 $2" in
+  "orders list") jq -s 'sort_by(.metadata.creationTimestamp) | reverse' "$d"/orders/*.json ;;
+  "orders get") cat "$(f "$3")" ;;
+  "orders cancel") set_phase "$3" Cancelled ;;
+  "orders teardown")
+    id=$3; shift 3
+    if [[ " $* " == *" --auto-merge "* ]] && jq -e '.fake.refuseAutoTeardown' "$(f "$id")" >/dev/null; then
+      echo "Error: auto-merge refused: rule persona-test-vms: not for teardowns" >&2; exit 3
+    fi
+    am=false; [[ " $* " == *" --auto-merge "* ]] && am=true
+    jq --argjson am "$am" '.status.phase = "TeardownPROpen" | .fake.autoTeardown = $am
+      | .status.teardown = {attempt: 1, delivery: {pullRequest: {number: 9, url: "https://github.com/o/fleet/pull/9", state: "open"}}}' \
+      "$(f "$id")" > "$d/tmp" && mv "$d/tmp" "$(f "$id")"
+    cat "$(f "$id")" ;;
+  "orders watch")
+    p=$(jq -r .status.phase "$(f "$3")")
+    if [ "$p" = TeardownPROpen ] && jq -e .fake.autoTeardown "$(f "$3")" >/dev/null; then set_phase "$3" Deleted; exit 0; fi
+    [ "$p" = Cancelled ] && exit 1
+    exit 1 ;;
+  *) echo "fake-claims: unexpected $*" >&2; exit 2 ;;
+esac

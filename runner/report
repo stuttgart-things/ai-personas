@@ -36,7 +36,19 @@ const clip = (s) => {
 const text = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x.text || '').join('\n') : '');
 
 const init = events.find((e) => e.type === 'system' && e.subtype === 'init') || {};
-const result = [...events].reverse().find((e) => e.type === 'result') || {};
+// A run with background tasks has one result event per segment (#26):
+// summary.json (persona-summary) holds the totals; without it, the same
+// rules here (cost cumulative = max, turns and duration = sum).
+const segs = events.filter((e) => e.type === 'result');
+const last = segs[segs.length - 1] || {};
+const result = summary.result || (segs.length ? {
+  ...last,
+  num_turns: segs.reduce((n, e) => n + (e.num_turns || 0), 0),
+  total_cost_usd: Math.max(...segs.map((e) => e.total_cost_usd || 0)),
+  duration_ms: segs.reduce((n, e) => n + (e.duration_ms || 0), 0),
+  segments: segs.length,
+  permission_denials: segs.flatMap((e) => e.permission_denials || []),
+} : {});
 const stamps = events.map((e) => e.timestamp).filter(Boolean).map((t) => Date.parse(t)).filter((n) => !isNaN(n));
 const t0 = stamps.length ? Math.min(...stamps) : null;
 const rel = (t) => {
@@ -63,7 +75,7 @@ const rows = [
   ['Merge', summary.merge === 'auto' ? 'auto (Bestelldienst, ADR 0004)' : summary.merge],
   ['Modell', init.model], ['Claude Code', init.claude_code_version],
   ['Start', t0 ? new Date(t0).toISOString().replace('.000', '') : ''], ['Dauer', dur],
-  ['Turns', result.num_turns], ['Kosten', result.total_cost_usd != null ? `${result.total_cost_usd.toFixed(2)} USD` : ''],
+  ['Turns', result.num_turns != null && result.segments > 1 ? `${result.num_turns} (${result.segments} Abschnitte)` : result.num_turns], ['Kosten', result.total_cost_usd != null ? `${result.total_cost_usd.toFixed(2)} USD` : ''],
   ['Ergebnis', result.subtype ? `${result.subtype}${result.is_error ? ' (Fehler)' : ''}` : 'kein Ergebnis (abgebrochen?)'],
 ].filter(([, v]) => v !== undefined && v !== null && v !== '');
 out.push('| | |', '|---|---|', ...rows.map(([k, v]) => `| ${k} | ${String(v).replace(/\|/g, '\\|')} |`), '');
@@ -91,7 +103,9 @@ if (tools.length) {
 } else out.push('_Keine Kommandos._', '');
 
 // The order's phases as claims printed them (claims orders watch / --wait).
-const PHASE = /^(\d\d:\d\d:\d\d)\s+(Pending|Ordered|Placed|PROpen|Merged|Applied|Building|Ready|Deleted|Cancelled|Failed)\b\s*(.*)$/;
+// `claims orders watch` prints "hh:mm:ss Phase …", the timeline of `claims
+// orders get` "yyyy-mm-dd hh:mm:ss Phase …".
+const PHASE = /^(?:\d{4}-\d\d-\d\d\s+)?(\d\d:\d\d:\d\d)\s+(Pending|Ordered|Placed|PROpen|Merged|Applied|Building|Ready|TeardownPROpen|TearingDown|Deleted|Cancelled|Failed)\b\s*(.*)$/;
 const phases = [];
 for (const { c } of tools) {
   const r = results.get(c.id);
@@ -122,6 +136,8 @@ for (const { c } of tools) {
   }
 }
 phases.sort((a, b) => a.time.localeCompare(b.time));
+// The same phase from a watch line and from the history: keep the first.
+for (let i = phases.length - 1; i > 0; i--) if (phases[i].phase === phases[i - 1].phase) phases.splice(i, 1);
 if (phases.length) {
   out.push('## Zeitablauf der Bestellung', '', '| Zeit (UTC) | Phase | seit vorher | Meldung |', '|---|---|---|---|');
   const toS = (h) => { const [a, b, c2] = h.split(':').map(Number); return a * 3600 + b * 60 + c2; };
@@ -187,6 +203,22 @@ const prs = found(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g);
 out.push('## Entstanden', '');
 out.push(`- Bestellungen: ${orders.length ? orders.map((o) => `\`${o}\``).join(', ') : '–'}`);
 out.push(`- Pull Requests: ${prs.length ? prs.join(', ') : '–'}`, '');
+// Cleanup by the runner after the persona (ADR 0007), from summary.json.
+const cl = summary.cleanup;
+if (cl && cl.mode) {
+  out.push('## Aufräumen', '');
+  if (cl.mode !== 'delete-claim') out.push(`_Szenario mit \`cleanup: ${cl.mode}\`: der Runner räumt nicht auf._`, '');
+  else if (!Array.isArray(cl.orders)) out.push('_Kein Ergebnis (Aufräumen nicht gelaufen)._', '');
+  else if (!cl.orders.length) out.push('_Keine Bestellungen aus diesem Lauf._', '');
+  else {
+    out.push('| Bestellung | vorher | Aktion | Ergebnis | Pull Request | Meldung |', '|---|---|---|---|---|---|');
+    for (const o of cl.orders) {
+      out.push(`| ${o.order ? `\`${o.order}\`` : '–'} | ${o.from || ''} | ${o.action || ''} | ${o.outcome || ''} | ${o.pr || ''} | ${oneLine(o.message || '', 140)} |`);
+    }
+    out.push('');
+  }
+}
+
 out.push('---', 'Erzeugt von `persona-report` aus `transcript.jsonl` (ADR 0002). Ausgaben gekürzt; vollständig im JSONL.', '');
 
 fs.writeFileSync(path.join(dir, 'transcript.md'), out.join('\n'));

@@ -17,6 +17,7 @@ on:
       - personas/**
       - scenarios/**
       - surfaces/**
+      - tests/**
       - Taskfile.yaml
       - .github/workflows/runner-image.yaml
   push:
@@ -26,6 +27,7 @@ on:
       - personas/**
       - scenarios/**
       - surfaces/**
+      - tests/**
       - Taskfile.yaml
       - .github/workflows/runner-image.yaml
   workflow_dispatch:

@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# persona-cleanup <run dir> <started>: removes what the persona ordered in this
+# run (ADR 0007, scenarios with cleanup: delete-claim). Runs in the runner
+# container after claude, with the persona's own token, through the order
+# service only (claims orders cancel / teardown, machinery-order-service
+# ADR 0003); no git, no kubectl.
+#
+# Which orders: the persona's own (--mine) created at or after <started>
+# (RFC 3339, taken before claude started) minus CLEANUP_SKEW (default 120 s,
+# clock skew against the order service). A persona never runs twice at once,
+# so nothing of another run falls into that window.
+#
+#   Ordered, PROpen                      -> cancel
+#   Merged, Applied, Building, Ready     -> teardown --auto-merge where the
+#                                           order was auto-merged; without it
+#                                           (or when the rule refuses) the
+#                                           delete-claim PR waits for a human
+#   TeardownPROpen, TearingDown          -> only wait
+#   Deleted, Cancelled, Failed           -> nothing to do
+#
+# Then waits for each up to CLEANUP_TIMEOUT (default 45m) and writes
+# <run dir>/cleanup.json: [{order, from, action, outcome, pr, message}].
+# outcome: deleted | cancelled | nothing | waiting-for-merge | failed | timeout.
+# Exit 0 when everything ended deleted/cancelled/nothing, 1 otherwise.
+set -uo pipefail
+dir=${1:?run dir}; started=${2:?started}
+skew=${CLEANUP_SKEW:-120}
+timeout=${CLEANUP_TIMEOUT:-45m}
+reason="cleanup after persona run ${RUN_ID:-$(basename "$dir")}"
+log() { echo "cleanup: $*" >&2; }
+
+since=$(( $(date -u -d "$started" +%s) - skew ))
+if ! list=$(claims orders list --mine -o json --non-interactive 2>"$dir/.cleanup-err"); then
+  log "cannot list orders: $(tail -1 "$dir/.cleanup-err")"
+  jq -n --arg m "$(tail -1 "$dir/.cleanup-err")" '[{order: null, action: "list", outcome: "failed", message: $m}]' > "$dir/cleanup.json"
+  rm -f "$dir/.cleanup-err"; exit 1
+fi
+rm -f "$dir/.cleanup-err"
+mine=$(jq -c --argjson since "$since" \
+  '[.[] | select((.metadata.creationTimestamp | fromdateiso8601) >= $since)
+        | {order: .metadata.name, from: (.status.phase // "Ordered"), auto: (.spec.autoMerge != null)}]' <<<"$list")
+log "$(jq length <<<"$mine") order(s) of this run"
+
+results='[]'
+add() { results=$(jq -c --argjson r "$1" '. + [$r]' <<<"$results"); }
+pending=()
+while read -r o; do
+  [ -n "$o" ] || continue
+  id=$(jq -r .order <<<"$o"); from=$(jq -r .from <<<"$o"); auto=$(jq -r .auto <<<"$o")
+  rec() { jq -nc --arg id "$id" --arg from "$from" --arg a "$1" --arg out "$2" --arg pr "${3:-}" --arg m "${4:-}" \
+    '{order: $id, from: $from, action: $a, outcome: $out, pr: (if $pr == "" then null else $pr end), message: $m}'; }
+  case $from in
+    Deleted|Cancelled|Failed)
+      add "$(rec none nothing)";;
+    Ordered|Pending|PROpen)
+      if err=$(claims orders cancel "$id" --non-interactive 2>&1 >/dev/null); then
+        log "$id: cancel asked"; pending+=("$id cancel - $from")
+      else
+        log "$id: cancel refused: ${err##*$'\n'}"; add "$(rec cancel failed "" "${err##*$'\n'}")"
+      fi;;
+    TeardownPROpen|TearingDown)
+      pending+=("$id wait - $from");;
+    *)
+      args=(--reason "$reason" --non-interactive -o json)
+      [ "$auto" = true ] && args+=(--auto-merge)
+      out=$(claims orders teardown "$id" "${args[@]}" 2>"$dir/.cleanup-err"); rc=$?
+      if [ $rc -eq 3 ] && [ "$auto" = true ]; then
+        # The rule does not cover teardowns: a human merges the delete-claim PR.
+        log "$id: auto-merge refused ($(tail -1 "$dir/.cleanup-err")), a human merges"
+        args=(--reason "$reason" --non-interactive -o json)
+        out=$(claims orders teardown "$id" "${args[@]}" 2>"$dir/.cleanup-err"); rc=$?
+        auto=false
+      fi
+      if [ $rc -ne 0 ]; then
+        m=$(tail -1 "$dir/.cleanup-err"); log "$id: teardown refused: $m"; add "$(rec teardown failed "" "$m")"
+      else
+        log "$id: teardown asked${auto:+ (auto-merge: $auto)}"; pending+=("$id teardown $auto $from")
+      fi
+      rm -f "$dir/.cleanup-err";;
+  esac
+done < <(jq -c '.[]' <<<"$mine")
+
+# Wait for each. A teardown without auto-merge waits for a human; the run does
+# not hold its pod for that: it records the open pull request and moves on.
+for p in "${pending[@]}"; do
+  read -r id action auto from <<<"$p"
+  rec() { jq -nc --arg id "$id" --arg from "$from" --arg a "$action" --arg out "$1" --arg pr "${2:-}" --arg m "${3:-}" \
+    '{order: $id, from: $from, action: $a, outcome: $out, pr: (if $pr == "" then null else $pr end), message: $m}'; }
+  if [ "$action" = teardown ] && [ "$auto" = false ]; then
+    o=$(claims orders get "$id" -o json --non-interactive 2>/dev/null) || o='{}'
+    add "$(rec waiting-for-merge "$(jq -r '.status.teardown.delivery.pullRequest.url // ""' <<<"$o")" "a human merges the delete-claim pull request")"
+    continue
+  fi
+  claims orders watch "$id" --timeout "$timeout" --interval 20s --non-interactive >/dev/null 2>&1; rc=$?
+  o=$(claims orders get "$id" -o json --non-interactive 2>/dev/null) || o='{}'
+  phase=$(jq -r '.status.phase // ""' <<<"$o")
+  pr=$(jq -r '.status.teardown.delivery.pullRequest.url // ""' <<<"$o")
+  msg=$(jq -r '.status.message // ""' <<<"$o")
+  case $phase in
+    Deleted) add "$(rec deleted "$pr")";;
+    Cancelled) add "$(rec cancelled "" "$msg")";;
+    *) if [ $rc -ne 0 ] && [ -z "$msg" ]; then msg="watch ended with $rc"; fi
+       out=failed; [[ $phase =~ ^(TeardownPROpen|TearingDown|PROpen|Merged|Applied|Building|Ready)$ ]] && out=timeout
+       add "$(rec "$out" "$pr" "$phase: $msg")";;
+  esac
+  log "$id: $(jq -r '.[-1].outcome' <<<"$results")"
+done
+
+jq . <<<"$results" > "$dir/cleanup.json"
+jq -e 'all(.outcome | IN("deleted", "cancelled", "nothing"))' <<<"$results" >/dev/null

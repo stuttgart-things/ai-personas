@@ -24,7 +24,7 @@ for attempt in 1 2 3; do
   git clone -q --depth 1 "https://github.com/$repo.git" "$tmp/r"
   dest=$(dest_of "$dir/summary.json" "$id")   # runs/<scenario>/<time>-<persona>
   mkdir -p "$tmp/r/$dest"
-  for f in transcript.md transcript.jsonl summary.json friction.txt; do
+  for f in transcript.md transcript.jsonl summary.json friction.txt cleanup.json; do
     [ -f "$dir/$f" ] && cp "$dir/$f" "$tmp/r/$dest/"
   done
   "$here/runs-index" "$tmp/r"

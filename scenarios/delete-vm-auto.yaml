@@ -1,0 +1,32 @@
+# Der Löschweg von der Nutzerseite (#27): bestellen, warten bis Ready, wieder
+# löschen, warten bis Deleted. Löschen geht nur über den Bestelldienst
+# (`claims orders teardown`, machinery-order-service ADR 0003): ein
+# delete-claim-Pull-Request, den der Dienst mit `--auto-merge` selbst merged,
+# wenn die Regel des Management-Clusters Teardowns erlaubt (persona-test-vms,
+# actions: [order, teardown]). Die Git-Wege von claims (delete, change) sind
+# für Personas gesperrt (surfaces/claims-cli.json).
+#
+# cleanup: delete-claim bleibt als Netz: Schafft es die Persona nicht, räumt
+# der Runner danach ab (ADR 0007); cleanup.json zeigt dann, was übrig war.
+name: delete-vm-auto
+personas: [developer]
+labs: [labul]
+merge: auto
+goal: >
+  Du brauchst kurz eine kleine Ubuntu-VM namens persona-delete-auto. Bestell
+  sie so, dass sie ohne Review gebaut wird, und warte, bis sie fertig ist.
+  Danach brauchst du sie nicht mehr: Lösch sie wieder, ebenfalls ohne Review,
+  und warte, bis sie wirklich weg ist. Sag am Ende, was du bestellt und
+  gelöscht hast, über welche Pull Requests, wie lange beides gedauert hat und
+  woran du erkannt hast, dass die VM weg ist.
+expect:
+  - verifier: order-pr
+  - verifier: auto-merged       # Bestell-PR vom Bestelldienst gemerged
+  - verifier: xr-ready
+    timeout: 20m
+  - verifier: teardown-pr       # delete-claim/<xr>, Order-Id-Trailer, vom Bestelldienst gemerged
+  - verifier: xr-deleted        # Order-Phase Deleted, machinery sieht die XR nicht mehr
+    timeout: 45m
+  - verifier: no-branches       # weder vm-<name> noch delete-claim/<xr> bleiben übrig
+cleanup: delete-claim
+ttl: 2h

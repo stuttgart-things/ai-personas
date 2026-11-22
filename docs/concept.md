@@ -91,7 +91,7 @@ Ein Lauf ist ein Container mit `claude` und `claims`, gestartet mit genau einem 
 
 **Container statt Host.** Ein Container ist Pflicht: kein `~/.kube`, kein `~/.ssh`, kein `gh`-Token, kein Credentials-Cache eines Admins. Das Image enthält nur `claude`, `claims` und `curl`.
 
-- **In CI:** ein normaler Container, als Tekton-Pod oder GitHub-Actions-Job. Dazu eine NetworkPolicy mit Egress nur zu claim-machinery-api, ZITADEL und der Anthropic API.
+- **In CI:** Tekton, eine Pipeline mit drei Pods (`credentials`, `run`, `publish`), jeder mit nur seinen Secrets und seinem Egress (ADR 0006, stage-time `execute-persona-run`). Der claude-Pod erreicht nur claim-machinery-api, den Bestelldienst, ZITADEL und die Anthropic API; ein `egress-check` prüft vor jedem Lauf, dass Vault und GitHub nicht erreichbar sind.
 - **Lokal beim Entwickeln:** `docker run` mit demselben Image. Docker Sandboxes (`docker sandbox run claude`) passen auch, sind aber für interaktive Sessions gedacht. Für reproduzierbare Läufe ist das eigene Image der bessere Standard, weil CI und lokal dann identisch sind. Später auf dem Cluster: Agent Sandbox (Abschnitt Stufe 2).
 
 **Bestellen ohne GitHub-Rechte.** Die Persona bestellt über einen Server, der den PR mit seiner eigenen GitHub-Identität öffnet. Sie braucht damit nur ihr ZITADEL-Token, wie ein User im Portal.
@@ -128,7 +128,7 @@ claude -p "$(yq .goal scenarios/$SCENARIO.yaml)" \
 2. Runner holt das Persona-Secret aus Vault und tauscht es gegen ein kurzlebiges Token.
 3. Container läuft `claude -p` bis Ziel erreicht, Budget leer oder Timeout.
 4. Verifier laufen außerhalb des Containers mit Leserechten.
-5. Cleanup läuft immer, auch bei Fehlschlag.
+5. Cleanup läuft immer, auch bei Fehlschlag: Bei `cleanup: delete-claim` storniert der Runner die offenen Bestellungen des Laufs bzw. baut die gemergten über den Bestelldienst ab (`claims orders teardown`, ADR 0007) und schreibt `cleanup.json`.
 6. Report geht als Artefakt und Teams-Karte raus.
 
 ## Verifikation und UX-Bewertung
