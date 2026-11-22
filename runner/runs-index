@@ -17,17 +17,20 @@ rows() {
         "| [\(.run)](\($rel)/transcript.md) | \(.persona) | \(.scenario) | \(.lab // "") | \(.merge // "human") | " +
         "\(((.result.result // "") | capture("(?i)ziel erreicht:?\\**:?\\s*(?<g>ja|nein|teilweise)") | .g | ascii_downcase) // "?") | " +
         "\(.result.subtype // "–")\(if .result.is_error then " (error)" else "" end) | \(.result.num_turns // "") | " +
-        "\(if .result.total_cost_usd then "\((.result.total_cost_usd * 100 | round) / 100) USD" else "" end) | \($fr) |"' "$s"
+        "\(if .result.total_cost_usd then "\((.result.total_cost_usd * 100 | round) / 100) USD" else "" end) | \($fr) | " +
+        "\(if (.cleanup.mode // "") != "delete-claim" then "–" elif (.cleanup.orders | type) != "array" then "?"
+            elif all(.cleanup.orders[]; .outcome | IN("deleted", "cancelled", "nothing")) then "ok"
+            else "open" end) |"' "$s"
     done
 }
-header='| Run | Persona | Scenario | Lab | Merge | Goal | Claude | Turns | Cost | Friction |
-|---|---|---|---|---|---|---|---|---|---|'
+header='| Run | Persona | Scenario | Lab | Merge | Goal | Claude | Turns | Cost | Friction | Cleanup |
+|---|---|---|---|---|---|---|---|---|---|---|'
 
 {
   cat <<'HEAD'
 # AI persona runs
 
-Reports of the persona test runs ([stuttgart-things/ai-personas](https://github.com/stuttgart-things/ai-personas), ADR 0005), filed as `runs/<scenario>/<yyyy-mm-ddThh-mm>-<persona>/`; each scenario folder has its own index. Each run has `transcript.md` (readable: commands with start and duration, the order's timeline, output, friction), `transcript.jsonl` (raw), `summary.json` and `friction.txt`. Written by `runner/publish-run`; the indexes are generated, do not edit. *Goal* is the persona's own verdict ("Ziel erreicht: ja / teilweise / nein"); *Claude* is whether the claude run itself finished.
+Reports of the persona test runs ([stuttgart-things/ai-personas](https://github.com/stuttgart-things/ai-personas), ADR 0005), filed as `runs/<scenario>/<yyyy-mm-ddThh-mm>-<persona>/`; each scenario folder has its own index. Each run has `transcript.md` (readable: commands with start and duration, the order's timeline, output, friction), `transcript.jsonl` (raw), `summary.json`, `friction.txt` and, where the runner cleaned up, `cleanup.json`. Written by `runner/publish-run`; the indexes are generated, do not edit. *Goal* is the persona's own verdict ("Ziel erreicht: ja / teilweise / nein"); *Claude* is whether the claude run itself finished; *Cleanup* is whether the runner removed what the run ordered (ADR 0007 in ai-personas: ok, open = something is left, – = scenario keeps it).
 
 ## Scenarios
 

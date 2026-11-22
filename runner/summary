@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# persona-summary <run dir> <run id> <persona> <scenario> <lab> <merge> <cleanup>:
+# writes <run dir>/summary.json from transcript.jsonl (and cleanup.json).
+#
+# A run with background tasks has one `result` event per segment (#26). In
+# those, total_cost_usd is cumulative, num_turns and duration_ms count the
+# segment only. So: cost = the largest, turns and duration = the sum;
+# subtype, is_error and the answer come from the last segment; permission
+# denials from all of them.
+set -euo pipefail
+dir=${1:?run dir}
+cl='null'; [ -s "$dir/cleanup.json" ] && cl=$(cat "$dir/cleanup.json")
+jq -s --arg run "$2" --arg p "$3" --arg s "$4" --arg lab "$5" --arg merge "$6" --arg cleanup "$7" \
+      --argjson cl "$cl" '
+  map(select(.type == "result")) as $r
+  | {run: $run, persona: $p, scenario: $s, lab: $lab, merge: $merge,
+     result: (if ($r | length) == 0 then null else
+       ($r | last | {subtype, is_error, result}) + {
+         num_turns: ($r | map(.num_turns // 0) | add),
+         total_cost_usd: ($r | map(.total_cost_usd // 0) | max),
+         duration_ms: ($r | map(.duration_ms // 0) | add),
+         segments: ($r | length),
+         permission_denials: ($r | map(.permission_denials // []) | add)
+       } end),
+     cleanup: {mode: $cleanup, orders: $cl}}' "$dir/transcript.jsonl" > "$dir/summary.json"

@@ -34,15 +34,18 @@ tasks:
           [ "$(id -u)" = 10001 ] || { echo "not running as persona"; exit 1; }
           claude --version; claims version | head -1; js-yaml --version; ssh -V
           claims order --help | grep -q -- "--auto-merge" || { echo "claims has no order --auto-merge"; exit 1; }
-          test -x /usr/local/bin/persona-report || { echo "persona-report missing"; exit 1; }
+          for b in persona-report persona-summary persona-cleanup; do test -x /usr/local/bin/$b || { echo "$b missing"; exit 1; }; done
+          claims orders teardown --help | grep -q -- "--auto-merge" || { echo "claims has no orders teardown --auto-merge"; exit 1; }
           for t in kubectl gh git vault orders; do
             if command -v "$t" >/dev/null; then echo "forbidden tool: $t"; exit 1; fi
           done
           cd /opt/ai-personas
           for p in personas/*/persona.yaml; do js-yaml "$p" | jq -e ".surface and .budget.usd" >/dev/null; done
-          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal and ((.merge // \"human\") | IN(\"human\", \"auto\"))" >/dev/null || { echo "bad scenario $s"; exit 1; }; done
+          for s in scenarios/*.yaml; do js-yaml "$s" | jq -e ".goal and ((.merge // \"human\") | IN(\"human\", \"auto\")) and ((.cleanup // \"none\") | IN(\"delete-claim\", \"none\"))" >/dev/null || { echo "bad scenario $s"; exit 1; }; done
           # ssh is denied unless a scenario asks for it (ADR 0003)
           jq -e ".permissions.deny | index(\"Bash(ssh:*)\")" surfaces/claims-cli.json >/dev/null
+          # claims paths that need git are closed to the persona (ADR 0001, 0007)
+          for c in delete change encrypt; do jq -e ".permissions.deny | index(\"Bash(claims $c:*)\")" surfaces/claims-cli.json >/dev/null || { echo "claims $c not denied"; exit 1; }; done
           echo "image ok"'
       - |
         set +e
@@ -61,6 +64,9 @@ tasks:
           -c 'mkdir -p /out/probe "$HOME" && touch /out/probe/ok && js-yaml --version >/dev/null && claude --version >/dev/null'
         test -f "$out/probe/ok" || { echo "output dir not writable as the caller"; exit 1; }
         rm -rf "$out"; echo "output mount ok"
+      - |
+        # summary/report over several result events (#26), cleanup (ADR 0007)
+        docker run --rm -v "$PWD/tests:/tests:ro" --entrypoint bash {{.IMAGE}} /tests/runner-test.sh /usr/local/bin
       - |
         # ssh as a uid the image does not know, as run.sh starts it
         docker run --rm --user 54321:54321 -e HOME=/tmp/persona-home --entrypoint bash {{.IMAGE}} -euo pipefail -c '
@@ -87,6 +93,11 @@ tasks:
     desc: One persona run (needs LAB_FILE or LAB/CLAIM_API_URL/ORDER_API_URL, VAULT_ADDR, VAULT_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY), e.g. task run PERSONA=developer SCENARIO=order-baseos-vm
     cmds:
       - IMAGE={{.IMAGE}} runner/run.sh {{.PERSONA}} {{.SCENARIO}}
+
+  test:
+    desc: Offline tests of the runner scripts on the host (bash, jq, node), no image needed
+    cmds:
+      - tests/runner-test.sh
 
   report:
     desc: Render transcript.md for a run directory (also older runs), e.g. task report RUN=runs/<run-id>

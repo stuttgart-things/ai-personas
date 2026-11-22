@@ -53,6 +53,14 @@ case $merge in
   human|auto) ;;
   *) echo "scenario $scenario: merge must be human or auto, not $merge" >&2; exit 2 ;;
 esac
+# What the runner removes after the persona (ADR 0007): delete-claim tears
+# down the persona's orders of this run through the order service, none
+# leaves them (e.g. for a follow-up run).
+cleanup=$(yaml "$sfile" '.cleanup // "none"')
+case $cleanup in
+  delete-claim|none) ;;
+  *) echo "scenario $scenario: cleanup must be delete-claim or none, not $cleanup" >&2; exit 2 ;;
+esac
 run_id=${RUN_ID:-$(date -u +%Y-%m-%dT%H-%M)-$persona-$scenario}
 out=${OUT_DIR:-/out}/$run_id
 mkdir -p "$out"
@@ -65,7 +73,7 @@ settings=$base/surfaces/$surface.json
 allowed=("Bash(claims:*)")
 context="Dein Werkzeug ist \`claims\`, schon mit deinem Login eingerichtet."
 if [ "$merge" = auto ]; then
-  context="$context Für diese Test-Bestellung brauchst du kein Review: Mit \`claims order … --auto-merge\` merged der Bestelldienst den Pull Request selbst, sobald die Checks grün sind."
+  context="$context Für diese Test-Bestellung brauchst du kein Review: Mit \`claims order … --auto-merge\` merged der Bestelldienst den Pull Request selbst, sobald die Checks grün sind. Das gilt auch, wenn du etwas wieder löschst."
 fi
 
 # SSH only where the scenario asks for it, and only with a certificate.
@@ -86,6 +94,7 @@ if has_cap ssh; then
   fi
 fi
 
+started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 claude -p "$goal" \
   --append-system-prompt "$(cat "$pdir/rules.md")
 
@@ -102,10 +111,13 @@ $context" \
 # Friction lines from the persona's own text, whole (quotes and all).
 jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' \
   "$out/transcript.jsonl" | grep -oE 'FRICTION: .*' | sort -u > "$out/friction.txt" || true
-jq -s '{run: $run, persona: $p, scenario: $s, lab: $lab, merge: $merge, merge: $merge,
-        result: (map(select(.type=="result")) | last | {subtype, is_error, num_turns, total_cost_usd, result})}' \
-  --arg run "$run_id" --arg p "$persona" --arg s "$scenario" --arg lab "${LAB:-}" --arg merge "$merge" \
-  "$out/transcript.jsonl" > "$out/summary.json" || true
+
+# Also after a failed or aborted claude run: what was ordered goes away.
+cleanup_rc=0
+if [ "$cleanup" = delete-claim ]; then
+  persona-cleanup "$out" "$started" || cleanup_rc=$?
+fi
+persona-summary "$out" "$run_id" "$persona" "$scenario" "${LAB:-}" "$merge" "$cleanup" || echo "persona-summary failed" >&2
 persona-report "$out" >/dev/null || echo "persona-report failed" >&2
 
 # A credential in the output stops the run here: nothing of it may be kept.
@@ -123,3 +135,5 @@ for v in PERSONA_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY SSH_KEY_LINE; d
 done
 
 echo "run $run_id: $(wc -l < "$out/friction.txt") friction line(s), output in $out"
+# Not an exit code: the report must still be published (ADR 0007).
+[ "$cleanup_rc" -eq 0 ] || echo "cleanup incomplete, see $out/cleanup.json" >&2

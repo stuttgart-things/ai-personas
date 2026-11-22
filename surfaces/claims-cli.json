@@ -1,7 +1,12 @@
 {
   "permissions": {
-    "allow": ["Bash(claims:*)"],
+    "allow": [
+      "Bash(claims:*)"
+    ],
     "deny": [
+      "Bash(claims delete:*)",
+      "Bash(claims change:*)",
+      "Bash(claims encrypt:*)",
       "Bash(kubectl:*)",
       "Bash(gh:*)",
       "Bash(git:*)",
