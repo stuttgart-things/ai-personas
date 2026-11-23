@@ -231,6 +231,7 @@ Der Pilot ist der offene Test von deploy-configure-rke#53: Persona `developer` b
 - Entschieden: Gruppen kommen aus ZITADEL-Projektrollen; eine Persona ist ein dedizierter User mit z. B. `backstage-developer` + `backstage-team-ai-personas` (Abschnitt Identitäten).
 - Entschieden: Bestellweg im Pilot ist machinery-order-service per `curl`; claims kann Client Credentials, `claims order` folgt (claims#124) (Abschnitt Ausführung).
 - Entschieden (2026-11-18): Personas bedienen die Produkt-CLIs, keine Hilfsskripte ([ADR 0001](adr/0001-personas-nutzen-produkt-clis.md)); jeder Lauf bekommt ein lesbares `transcript.md` ([ADR 0002](adr/0002-transcript-pro-lauf.md)); SSH auf bestellte VMs mit kurzlebigen Zertifikaten der Vault-SSH-CA ([ADR 0003](adr/0003-ssh-mit-vault-ssh-ca.md)). Alle ADRs: [`adr/`](adr/README.md).
+- Ausblick: vom Testen zum Betreiben mit Agenten (Agentic Ops), Stufenplan und Leitplanken in [`agentic-ops.md`](agentic-ops.md).
 - Offen: Welcher Anthropic-API-Key für Läufe in CI, und mit welchem Monatsbudget?
 - Entschieden: Ziel sind beide Labs, die ersten Läufe auf LabUL. Persona-User gibt es dann pro Lab, Lab-Bindung im privaten Repo.
 - Vorschlag: Browser-Personas loggen sich mit Passwort + TOTP (Seed in Vault) ein, MFA bleibt an; Fallback eigene Org ohne erzwungenes MFA (Abschnitt Identitäten). Zu prüfen: aktuelle Login-Policy der ZITADEL-Instanzen.

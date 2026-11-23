@@ -11,6 +11,7 @@ Keine godlike AI: Die Rechte zieht die Identität (ZITADEL-Rollen), nicht der Pr
 | Pfad | Was |
 | --- | --- |
 | [`docs/concept.md`](docs/concept.md) | das Konzept: Prinzipien, Identitäten, Ausführung, Verifikation, Sicherheit, Agent Sandbox, Backstage, Pilot |
+| [`docs/agentic-ops.md`](docs/agentic-ops.md) | vom Testen zum Betreiben: Begriffe (AIOps, Agentic Ops), Stufenplan, Leitplanken |
 | `personas/<name>/persona.yaml` | Identität, ZITADEL-Rollen, Oberfläche, Budget |
 | `personas/<name>/rules.md` | Verhalten in User-Sprache, an den System-Prompt angehängt |
 | `scenarios/<name>.yaml` | Ziel in User-Sprache, Erwartungen (Verifier), Cleanup, TTL |
