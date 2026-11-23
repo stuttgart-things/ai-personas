@@ -101,6 +101,20 @@ jobs:
           path: /tmp/trivy-scan-report.json
           retention-days: 30
 
+      - name: Fail on fixable CRITICAL findings
+        run: |
+          # Gate (#24): a CRITICAL finding that has a fixed version fails the
+          # build; the rest is reported only (artifact above).
+          jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]?
+            | select(.Severity == "CRITICAL" and (.FixedVersion // "") != "")
+            | "\(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion) (\($t))"' \
+            /tmp/trivy-scan-report.json > /tmp/critical-fixable.txt
+          if [ -s /tmp/critical-fixable.txt ]; then
+            echo "::error::CRITICAL findings with a fix available:"; cat /tmp/critical-fixable.txt; exit 1
+          fi
+          jq -r '[.Results[]?.Vulnerabilities[]?] | "CRITICAL \(map(select(.Severity=="CRITICAL"))|length), HIGH \(map(select(.Severity=="HIGH"))|length), fixable \(map(select((.FixedVersion//"")!=""))|length)"' \
+            /tmp/trivy-scan-report.json | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Summary
         run: |
           {
@@ -172,6 +186,20 @@ jobs:
           name: trivy-scan-report
           path: /tmp/trivy-scan-report.json
           retention-days: 30
+
+      - name: Fail on fixable CRITICAL findings
+        run: |
+          # Gate (#24): a CRITICAL finding that has a fixed version fails the
+          # build; the rest is reported only (artifact above).
+          jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]?
+            | select(.Severity == "CRITICAL" and (.FixedVersion // "") != "")
+            | "\(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion) (\($t))"' \
+            /tmp/trivy-scan-report.json > /tmp/critical-fixable.txt
+          if [ -s /tmp/critical-fixable.txt ]; then
+            echo "::error::CRITICAL findings with a fix available:"; cat /tmp/critical-fixable.txt; exit 1
+          fi
+          jq -r '[.Results[]?.Vulnerabilities[]?] | "CRITICAL \(map(select(.Severity=="CRITICAL"))|length), HIGH \(map(select(.Severity=="HIGH"))|length), fixable \(map(select((.FixedVersion//"")!=""))|length)"' \
+            /tmp/trivy-scan-report.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       # crane copy = re-tag by digest, no rebuild.
       - name: Crane re-tag :sha -> :latest

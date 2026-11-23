@@ -6,19 +6,26 @@
 # repository root:
 #   docker build -f runner/Containerfile -t ai-personas-runner .
 #   dagger -c 'host | directory . | docker-build --dockerfile runner/Containerfile'
-FROM docker.io/library/node:22-bookworm-slim
+FROM docker.io/library/node:22-trixie-slim
 
 ARG CLAUDE_CODE_VERSION=2.1.326
 ARG CLAIMS_VERSION=0.30.0
-ARG JS_YAML_VERSION=4.1.0
+ARG JS_YAML_VERSION=4.3.2
 ARG TARGETARCH=amd64
 
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends ca-certificates curl jq openssh-client libnss-wrapper \
  && rm -rf /var/lib/apt/lists/*
 
+# npm and corepack only install; the persona does not need them, and they
+# bring most of the image's Node findings (#24). Claude Code must not update
+# itself either: the version is pinned above.
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "js-yaml@${JS_YAML_VERSION}" \
- && npm cache clean --force
+ && npm cache clean --force \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /root/.npm
+ENV DISABLE_AUTOUPDATER=1
 
 # claims from its GitHub release, checked against the release's checksums.
 RUN set -eux; \
@@ -32,7 +39,7 @@ RUN set -eux; \
     rm -f /tmp/claims /tmp/"${f}"
 
 # Fail the build if a tool the persona must not have slipped in.
-RUN for t in kubectl gh git vault; do \
+RUN for t in kubectl gh git vault npm npx corepack; do \
       if command -v "$t" >/dev/null; then echo "forbidden tool in image: $t"; exit 1; fi; \
     done
 
