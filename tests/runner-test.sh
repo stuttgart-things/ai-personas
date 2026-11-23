@@ -103,7 +103,9 @@ vorder() { # id cluster history-json
                delivery: {pullRequest: {url: "https://github.com/o/fleet/pull/1", state: "merged"}}}}' > "$FAKE_DIR/orders/$1.json"
 }
 vorder ord-v1 machinery-dev '[{"phase":"Ordered"},{"phase":"PROpen"},{"phase":"Merged"},{"phase":"Ready"},{"phase":"Deleted"}]'
+# in the image the scenarios are under /opt/ai-personas, not next to /tests
 scen=$here/../scenarios/verify-vm-ssh-auto.yaml
+[ -f "$scen" ] || scen=/opt/ai-personas/scenarios/verify-vm-ssh-auto.yaml
 PATH=$work/bin:$PATH MANAGEMENT_CLUSTER=machinery-dev "$verdict" "$vrun" "$scen" "$(at 0)" >/dev/null
 jq -e '.passed and .orders == 1 and .managementCluster == "machinery-dev"
        and ([.checks[] | select(.kind == "hard") | .name] | sort) == ["auto-merged","claude-finished","cleanup","cluster","order-pr","xr-ready"]
