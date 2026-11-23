@@ -4,8 +4,11 @@
 # one definition of the image (docker build, task build and CI); Dagger only
 # drives the build.
 #
-# PR / dispatch: build to ttl.sh, smoke test, Trivy. No ghcr writes.
-# main:          build once to ghcr :<sha>, smoke test, Trivy, crane :latest.
+# Every run: build to ttl.sh, then smoke test, Trivy and the gate on that
+# image, by digest. Only on main, and only when all of that is green, crane
+# copies exactly that digest to ghcr as :<sha> and :latest. So nothing lands
+# on ghcr that was not checked. ttl.sh is anonymous, which is why every step
+# after the build names the digest, not the tag.
 # The tag is the commit, so a pipeline's runnerImage and aiPersonasRevision
 # (publish-run) can name the same one.
 name: Runner image
@@ -48,8 +51,10 @@ env:
 jobs:
   build-validate:
     name: build-validate (ttl.sh)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.digest.outputs.ref }}
+      digest: ${{ steps.digest.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -69,6 +74,20 @@ jobs:
             --progress plain
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
 
+      # Pin the pushed image by digest: everything below, including the copy
+      # to ghcr, uses exactly this image, even if someone pushes the same
+      # ttl.sh tag in between.
+      - name: Resolve digest
+        id: digest
+        run: |
+          img="ttl.sh/${IMAGE}:${GITHUB_SHA}"
+          docker pull -q "$img" >/dev/null
+          ref=$(docker inspect --format '{{index .RepoDigests 0}}' "$img")
+          case "$ref" in "ttl.sh/${IMAGE}@sha256:"*) ;; *) echo "::error::unexpected digest ref: $ref"; exit 1 ;; esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "digest=${ref#*@}" >> "$GITHUB_OUTPUT"
+          echo "$ref"
+
       # From the release, checked against its checksums (arduino/setup-task
       # is not on the org's allowed-actions list).
       - name: Install Task
@@ -84,14 +103,14 @@ jobs:
       # User, versions, forbidden tools, YAML of personas/scenarios, entrypoint
       # guards; no API key needed.
       - name: Smoke test
-        run: task smoke IMAGE="ttl.sh/${{ env.IMAGE }}:${{ github.sha }}"
+        run: task smoke IMAGE="${{ steps.digest.outputs.ref }}"
 
       - name: Scan image with Trivy
         uses: dagger/dagger-for-github@v8.4.1
         with:
           version: ${{ env.DAGGER_VERSION }}
           module: github.com/stuttgart-things/dagger/trivy@v0.90.1
-          call: scan-image --image-ref="ttl.sh/${{ env.IMAGE }}:${{ github.sha }}" --severity="HIGH,CRITICAL" --trivy-version="0.64.1" export --path=/tmp/trivy-scan-report.json
+          call: scan-image --image-ref="${{ steps.digest.outputs.ref }}" --severity="HIGH,CRITICAL" --trivy-version="0.64.1" export --path=/tmp/trivy-scan-report.json
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
 
       - name: Upload scan report
@@ -101,123 +120,96 @@ jobs:
           path: /tmp/trivy-scan-report.json
           retention-days: 30
 
-      - name: Fail on fixable CRITICAL findings
+      # Gate (#24): a CRITICAL finding that has a fixed version fails the
+      # build. The summary lists every CRITICAL and every HIGH with a fix;
+      # the full report is the artifact above.
+      - name: Trivy findings and gate
         run: |
-          # Gate (#24): a CRITICAL finding that has a fixed version fails the
-          # build; the rest is reported only (artifact above).
+          r=/tmp/trivy-scan-report.json
+          {
+            echo "## Trivy (HIGH, CRITICAL)"
+            echo ""
+            jq -r '[.Results[]?.Vulnerabilities[]?] | "CRITICAL \(map(select(.Severity=="CRITICAL"))|length), HIGH \(map(select(.Severity=="HIGH"))|length), with a fixed version \(map(select((.FixedVersion//"")!=""))|length)"' "$r"
+            echo ""
+            rows=$(jq -r '[.Results[]? | .Target as $t | .Vulnerabilities[]?
+                | select(.Severity == "CRITICAL" or (.FixedVersion // "") != "")
+                | {s: .Severity, p: .PkgName, id: .VulnerabilityID, i: .InstalledVersion, f: (.FixedVersion // "–"), t: ($t | sub("^[^ ]+ \\("; "("))}]
+              | unique_by([.id, .p, .t]) | sort_by(.s != "CRITICAL", .p) | .[:50][]
+              | "| \(.s) | `\(.p)` | \(.id) | \(.i) | \(.f) | \(.t) |"' "$r")
+            if [ -n "$rows" ]; then
+              echo "| Severity | Package | CVE | Installed | Fixed | Target |"
+              echo "|---|---|---|---|---|---|"
+              echo "$rows"
+            else
+              echo "No CRITICAL finding and no HIGH finding with a fix."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]?
             | select(.Severity == "CRITICAL" and (.FixedVersion // "") != "")
             | "\(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion) (\($t))"' \
-            /tmp/trivy-scan-report.json > /tmp/critical-fixable.txt
+            "$r" > /tmp/critical-fixable.txt
           if [ -s /tmp/critical-fixable.txt ]; then
             echo "::error::CRITICAL findings with a fix available:"; cat /tmp/critical-fixable.txt; exit 1
           fi
-          jq -r '[.Results[]?.Vulnerabilities[]?] | "CRITICAL \(map(select(.Severity=="CRITICAL"))|length), HIGH \(map(select(.Severity=="HIGH"))|length), fixable \(map(select((.FixedVersion//"")!=""))|length)"' \
-            /tmp/trivy-scan-report.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Summary
         run: |
           {
             echo "## Runner image validated (ttl.sh)"
             echo ""
-            echo "\`ttl.sh/${{ env.IMAGE }}:${{ github.sha }}\` (expires on ttl.sh)"
+            echo "\`${{ steps.digest.outputs.ref }}\` (expires on ttl.sh)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: publish (ghcr)
+    needs: build-validate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     env:
-      REGISTRY_USERNAME: ${{ github.actor }}
       REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Dagger build and push (ghcr :sha)
-        uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: ${{ env.DAGGER_VERSION }}
-          module: github.com/stuttgart-things/dagger/docker@v0.90.1
-          call: >-
-            build-and-push
-            --source .
-            --dockerfile runner/Containerfile
-            --repository-name ${{ env.IMAGE }}
-            --registry-url ${{ env.REGISTRY }}
-            --registry-username env:REGISTRY_USERNAME
-            --registry-password env:REGISTRY_PASSWORD
-            --tag "${{ github.sha }}"
-            --progress plain
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-
-      - name: Log in to ghcr (smoke test pulls :sha)
-        run: echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
-
-      # From the release, checked against its checksums (arduino/setup-task
-      # is not on the org's allowed-actions list).
-      - name: Install Task
-        run: |
-          base=https://github.com/go-task/task/releases/download/$TASK_VERSION
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "$base/task_linux_amd64.tar.gz"
-          curl -fsSL "$base/task_checksums.txt" | grep ' task_linux_amd64.tar.gz$' | sha256sum -c -
-          tar -xzf task_linux_amd64.tar.gz task
-          sudo install -m 0755 task /usr/local/bin/task
-          task --version
-
-      - name: Smoke test
-        run: task smoke IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}"
-
-      - name: Scan image with Trivy
-        uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: ${{ env.DAGGER_VERSION }}
-          module: github.com/stuttgart-things/dagger/trivy@v0.90.1
-          call: scan-image --image-ref="${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}" --severity="HIGH,CRITICAL" --trivy-version="0.64.1" export --path=/tmp/trivy-scan-report.json
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-
-      - name: Upload scan report
-        uses: actions/upload-artifact@v7
-        with:
-          name: trivy-scan-report
-          path: /tmp/trivy-scan-report.json
-          retention-days: 30
-
-      - name: Fail on fixable CRITICAL findings
-        run: |
-          # Gate (#24): a CRITICAL finding that has a fixed version fails the
-          # build; the rest is reported only (artifact above).
-          jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]?
-            | select(.Severity == "CRITICAL" and (.FixedVersion // "") != "")
-            | "\(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion) (\($t))"' \
-            /tmp/trivy-scan-report.json > /tmp/critical-fixable.txt
-          if [ -s /tmp/critical-fixable.txt ]; then
-            echo "::error::CRITICAL findings with a fix available:"; cat /tmp/critical-fixable.txt; exit 1
-          fi
-          jq -r '[.Results[]?.Vulnerabilities[]?] | "CRITICAL \(map(select(.Severity=="CRITICAL"))|length), HIGH \(map(select(.Severity=="HIGH"))|length), fixable \(map(select((.FixedVersion//"")!=""))|length)"' \
-            /tmp/trivy-scan-report.json | tee -a "$GITHUB_STEP_SUMMARY"
-
-      # crane copy = re-tag by digest, no rebuild.
-      - name: Crane re-tag :sha -> :latest
+      # crane copy = the checked image by digest, no rebuild.
+      - name: Crane copy ttl.sh@digest -> ghcr :sha
         uses: dagger/dagger-for-github@v8.4.1
         with:
           version: ${{ env.DAGGER_VERSION }}
           module: github.com/stuttgart-things/dagger/crane@v0.91.0
           call: >-
             copy
-            --source ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
-            --target ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
-            --source-registry ${{ env.REGISTRY }}
-            --source-username ${{ github.actor }}
-            --source-password env:REGISTRY_PASSWORD
+            --source ${{ needs.build-validate.outputs.ref }}
+            --target ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
             --target-registry ${{ env.REGISTRY }}
             --target-username ${{ github.actor }}
             --target-password env:REGISTRY_PASSWORD
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+
+      - name: Crane copy ttl.sh@digest -> ghcr :latest
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: ${{ env.DAGGER_VERSION }}
+          module: github.com/stuttgart-things/dagger/crane@v0.91.0
+          call: >-
+            copy
+            --source ${{ needs.build-validate.outputs.ref }}
+            --target ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+            --target-registry ${{ env.REGISTRY }}
+            --target-username ${{ github.actor }}
+            --target-password env:REGISTRY_PASSWORD
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+
+      # The ghcr tags must point at the digest that was checked.
+      - name: Verify digest on ghcr
+        run: |
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          want="${{ needs.build-validate.outputs.digest }}"
+          for tag in "${{ github.sha }}" latest; do
+            got=$(docker buildx imagetools inspect "$REGISTRY/$IMAGE:$tag" --format '{{json .Manifest}}' | jq -r .digest)
+            echo "$tag: $got"
+            [ "$got" = "$want" ] || { echo "::error::$tag has $got, want $want"; exit 1; }
+          done
 
       - name: Summary
         run: |
@@ -226,4 +218,5 @@ jobs:
             echo ""
             echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}\`"
             echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:latest\`"
+            echo "- digest \`${{ needs.build-validate.outputs.digest }}\` (checked on ttl.sh)"
           } >> "$GITHUB_STEP_SUMMARY"
