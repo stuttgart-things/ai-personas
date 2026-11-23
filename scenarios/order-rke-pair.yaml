@@ -10,13 +10,14 @@ capabilities: [ssh]
 merge: auto
 goal: >
   Du brauchst zwei kleine Ubuntu-VMs für einen Kubernetes-Test, eine namens
-  persona-rke-srv und eine namens persona-rke-agt. Bestell beide so, dass sie
+  persona-rke-srv und eine namens persona-rke-agt. Bestell für dein Team ai-personas, damit deine Teamkollegen die Bestellung auch sehen. Bestell beide so, dass sie
   ohne Review gebaut werden, warte, bis beide fertig sind, und melde dich auf
   beiden an. Prüf dabei, ob sie Ubuntu sind, wie viele CPUs und wie viel
   Speicher sie haben und ob sie sich gegenseitig erreichen. Lass die VMs
   stehen. Nenn am Ende für jede VM Name, Adresse und Bestell-ID.
 expect:
   - verifier: order-pr
+  - verifier: order-owner       # owner group:default/ai-personas, in der Order und im Claim
   - verifier: auto-merged
   - verifier: xr-ready
     timeout: 20m

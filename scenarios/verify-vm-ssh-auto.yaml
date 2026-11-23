@@ -10,12 +10,13 @@ capabilities: [ssh]
 merge: auto
 goal: >
   Du brauchst eine kleine Ubuntu-VM namens persona-ssh-auto für einen kurzen
-  Test. Bestell sie so, dass sie ohne Review gebaut wird, warte, bis sie fertig
+  Test. Bestell für dein Team ai-personas, damit deine Teamkollegen die Bestellung auch sehen. Bestell sie so, dass sie ohne Review gebaut wird, warte, bis sie fertig
   ist, melde dich dann auf ihr an und prüf, ob sie wirklich Ubuntu ist und wie
   viele CPUs und wie viel Speicher sie hat. Sag am Ende, was du bestellt hast,
   wer den Pull Request gemerged hat und was du auf der VM gesehen hast.
 expect:
   - verifier: order-pr
+  - verifier: order-owner       # owner group:default/ai-personas, in der Order und im Claim
   - verifier: auto-merged     # der PR wurde vom Bestelldienst gemerged
   - verifier: xr-ready
     timeout: 20m
