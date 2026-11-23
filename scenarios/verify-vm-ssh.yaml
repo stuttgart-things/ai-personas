@@ -8,12 +8,13 @@ capabilities: [ssh]
 merge: human
 goal: >
   Du brauchst eine kleine Ubuntu-VM namens persona-ssh-check für einen kurzen
-  Test. Bestell sie, warte, bis sie fertig ist (den Pull Request merged ein
+  Test. Bestell für dein Team ai-personas, damit deine Teamkollegen die Bestellung auch sehen. Bestell sie, warte, bis sie fertig ist (den Pull Request merged ein
   Kollege), melde dich dann auf ihr an und prüf, ob sie wirklich Ubuntu ist und
   wie viele CPUs und wie viel Speicher sie hat. Sag am Ende, was du bestellt
   hast und was du auf der VM gesehen hast.
 expect:
   - verifier: order-pr
+  - verifier: order-owner       # owner group:default/ai-personas, in der Order und im Claim
   - verifier: xr-ready
     timeout: 20m
   - verifier: ssh-login       # die Antwort nennt OS, CPUs und Speicher der VM

@@ -1,6 +1,8 @@
 # Pilot (docs/concept.md, Abschnitt Pilot): zwei kleine baseos-VMs, danach
 # RKE2 Server + Agent per Hand (deploy-configure-rke#53).
 # Bestellweg: claims order (über machinery-order-service), kein Git-Token (ADR 0001).
+# Ohne Hinweis aufs Team (#30): zeigt, ob die Persona von sich aus für ihr
+# Team bestellt. Die anderen Bestell-Szenarien sagen es ihr.
 name: order-baseos-vm
 personas: [developer]
 labs: [labul]
