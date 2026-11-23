@@ -71,13 +71,78 @@ Sinnvoll:
 - **Day-2-Diagnose:** zuerst nur lesen (Status, Logs, Metriken), dann einen Change als Pull Request vorschlagen.
 - **Zusammenfassen:** für den Menschen in einem Satz, was bestellt, gebaut und geprüft wurde.
 
+## Was die AI bestimmt
+
+Die AI wählt Template und Werte, aber nur innerhalb des Rahmens, den die Automatisierung vorgibt und selbst prüft. Sie schlägt eine Bestellung vor, sie baut nichts. Was gebaut wird, steht danach als Claim im Pull Request, nicht im Prompt.
+
+| Schicht | Wer entscheidet | Womit |
+| --- | --- | --- |
+| Was überhaupt möglich ist | Plattform-Team, im Template | `enum`, `pattern`, Defaults, `hidden`, `showWhen`/`enumWhen`, `orderRoles`, eingeschränkte Template-Varianten |
+| Was bestellt wird | AI schlägt vor, Mensch oder Regel bestätigt | Template-Wahl und Parameter |
+| Wie gebaut wird | nur die Automatisierung | KCL rendert, Crossplane baut, Verifier prüfen |
+
+Die AI wählt aus einer Speisekarte, sie kocht nicht: keine KCL-Module, keine freien Manifeste, keine Werte außerhalb des Templates. Versucht sie es, lehnt `CheckParams` mit 400 ab; ein Template ohne passende Rolle gibt 403.
+
+Die Parameter einer Bestellung fallen in drei Gruppen:
+
+| Art | Beispiel | Quelle |
+| --- | --- | --- |
+| Fest | Image-Quelle, Netz, Policies | Template (Default oder `hidden`); die AI fasst sie nicht an |
+| Abgeleitet | Owner/Team, Lab, `requested-by` | Identität und Kontext (Rollen im Token, Lab-Bindung), kein Raten |
+| Gewählt | Template, Größe, Anzahl Nodes, Laufzeit | Hier liegt der Mehrwert: aus „klein, zum Testen, eine Woche" werden Werte |
+
+Regeln:
+
+- **Herkunft je Wert:** Für jeden gewählten Wert nennt die AI die Quelle: „vom User gesagt", „Default des Templates" oder „Annahme, weil …".
+- **Nachfragen statt raten**, wenn es auf den Wert ankommt (Team, Lab) und der Auftrag ihn nicht hergibt.
+- **Vorschau vor der Bestellung:** Render ohne Bestellung (`claims render --stdout`, Preview mit `notify=false`).
+- **Bestätigung:** durch einen Menschen im Pull Request (Absicht im Originalwortlaut, Werte mit Begründung, gerenderter Claim) oder durch eine Auto-Merge-Regel des Bestelldienstes. Die Regel ist bewusst keine AI-Entscheidung.
+- **Der Claim ist das Ergebnis, nicht der Prompt.** Dieselbe Absicht kann beim nächsten Mal andere Werte ergeben. Wer nachbauen will, nimmt den Claim aus dem Git, nicht die AI.
+
+Folgerung für Templates: Je weniger Freiheitsgrade, desto sicherer kann die AI sie befüllen. T-Shirt-Größen als `enum` statt freier Werte für CPU und RAM; für Entwickler und Agenten eigene Varianten mit eingeschränkten Größen und passenden `orderRoles`. Wer seine Werte genau kennt, braucht keine AI: Formular oder CLI sind dann schneller und eindeutiger. Die AI lohnt sich, wo die Absicht unscharf ist.
+
+## Assistent vor dem Backstage-Formular
+
+Umfangreiche Templates („VM bestellen mit späterer Provisionierung") überfordern manche User, auch wenn das eigentlich eine Designfrage des Templates ist. Ein Assistent kann solche bestehenden Templates nutzbar machen, ohne sie umzubauen: Er übersetzt eine Beschreibung in Text oder Sprache in ein **vorausgefülltes Formular**, das der User prüft und selbst abschickt.
+
+```text
+Sprache / Text  ->  Text  ->  AI ordnet zu  ->  vorausgefülltes Formular  ->  User prüft und schickt ab
+"kleine Ubuntu-VM   (STT)     Template +        Felder markiert:              normaler Scaffolder-Lauf:
+ für zwei Wochen,             Parameter         gesagt / Annahme / Default    Validierung, PR, Merge-Regeln
+ mit Docker drauf"
+```
+
+1. **Eingabe:** Text oder Sprache. Sprache ist nur ein vorgeschalteter Speech-to-Text-Schritt (Spracherkennung des Browsers oder ein Whisper-Modell); danach ist alles Text.
+2. **Template wählen:** aus dem Katalog, über Titel, Beschreibung und Tags der Scaffolder-Templates bzw. die Claim-Templates von claim-machinery-api.
+3. **Parameter setzen:** aus dem Parameter-Schema des Templates (Scaffolder-API `parameter-schema`; bei Claim-Templates `enum`, `pattern`, `showWhen`/`enumWhen`), nach den Regeln aus „Was die AI bestimmt".
+4. **Formular öffnen:** Der Scaffolder öffnet ein Template mit vorbelegten Werten (`formData` in der URL). Der User sieht das gewohnte Formular.
+5. **Abschicken:** durch den User, mit seiner Backstage-Identität. Ab da läuft alles wie heute.
+
+Warum vorausfüllen statt direkt ausführen:
+
+- Der Mensch sieht jeden Wert, bevor etwas passiert (Stufe 3).
+- Bestehende Templates funktionieren sofort.
+- User lernen das Formular kennen, statt dass es hinter einem Chat verschwindet.
+- Die AI hat keine eigenen Rechte; abgeschickt wird mit der Identität des Users.
+
+Direkt ausführen ginge auch: Backstage kann Scaffolder-Aktionen per MCP für Agenten bereitstellen. Das ist der Schritt zu Stufe 4 und kommt danach.
+
+Zu beachten:
+
+- **Felder kennzeichnen:** Jedes Feld zeigt seine Herkunft; Annahmen sind hervorgehoben, damit der User genau die prüft.
+- **Pflichtfelder ohne Quelle** bleiben leer oder werden nachgefragt; das Formular blockiert leere Pflichtfelder ohnehin.
+- **Sprache trägt Absichten, keine Bezeichner.** „Klein, zwei Wochen, mit Docker" funktioniert; exakte VM-Namen oder Adressen werden oft falsch erkannt. Deshalb ist die Bestätigung im Formular hier Pflicht.
+- **Datenschutz:** Audio und Text gehen an einen STT-Dienst und ein LLM. Bei Bedarf lokal (Whisper im Cluster) oder über einen freigegebenen Anbieter.
+- **Bedingte Felder:** Der Assistent beachtet `showWhen`/`enumWhen`, am besten mit derselben Logik wie claims und claim-machinery-api, damit er keine Werte für ausgeblendete Felder vorschlägt.
+- **Testen mit Personas:** Ein Szenario wie „`newcomer` beschreibt in eigenen Worten, was er braucht" prüft, ob der Assistent das richtige Template und sinnvolle Werte wählt. Mit der Oberfläche `backstage-browser` aus [`concept.md`](concept.md) geht das durch das echte Formular.
+
 ## Stufenplan
 
 Jede Stufe ist für sich nützlich. Keine braucht neue Rechte für das Modell, bevor die vorige trägt.
 
 1. **Verifier als Abnahme für echte Bestellungen.** `xr-ready`, `ssh-login` und weitere Verifier laufen nach jeder echten Bestellung und hängen ihr Ergebnis an die Order. Keine KI nötig. Dafür müssen die Verifier aus `verifiers/` unabhängig vom Runner aufrufbar sein.
 2. **Personas als Canary.** Ausgewählte Szenarien (`verify-vm-ssh-auto`, `delete-vm-auto`) laufen nächtlich je Lab. Ein roter Lauf ist ein Betriebssignal, nicht nur ein Testergebnis, und geht über denselben homerun-Weg an den Betrieb. Grenzen aus `concept.md` gelten weiter: Lab-Kapazität, Budget, höchstens täglich.
-3. **Ops-Assistent mit `merge: human`.** Ein Mensch formuliert die Absicht (CLI, später Backstage oder Teams), der Agent wählt Template und Parameter, bestellt im Auftrag dieses Menschen und meldet den Pull Request. Ein Mensch merged. Voraussetzung: On-Behalf-Of-Token, damit `requested-by` und die Rechte die des Menschen sind.
+3. **Ops-Assistent mit `merge: human`.** Ein Mensch formuliert die Absicht (CLI, später Backstage oder Teams, auch per Sprache), der Agent wählt Template und Parameter (Abschnitte „Was die AI bestimmt" und „Assistent vor dem Backstage-Formular"), bestellt im Auftrag dieses Menschen und meldet den Pull Request. Ein Mensch merged. Voraussetzung: On-Behalf-Of-Token, damit `requested-by` und die Rechte die des Menschen sind.
 4. **Begrenzte Autonomie.** Auto-Merge für risikoarme Klassen (kleine VMs, Lab, mit TTL), gesteuert ausschließlich über die Regeln des Bestelldienstes. Kontingente je Auftraggeber; Verifier entscheiden über „fertig", bei Rot eskaliert der Agent statt zu wiederholen.
 5. **Day-2-Betrieb.** Der Agent liest Alarme und Status, diagnostiziert und schlägt Änderungen als Pull Request vor (`change-claim/*`, Teardown). Zuerst nur lesend, Schreiben erst mit eigener Entscheidung als ADR.
 
@@ -103,4 +168,5 @@ Die Szenarien dieses Repos werden zur Abnahme für jeden Ops-Agenten: Ein neues 
 - Wo läuft der Ops-Agent: als eigener Dienst neben dem Bestelldienst, als Tekton-Lauf wie die Personas, oder als Agent Sandbox (Stufe 2 in `concept.md`)?
 - Wohin melden Canary-Läufe: an den Teams-Kanal der Personas oder an den Betrieb?
 - Welche Template-Klassen gelten als risikoarm genug für Stufe 4?
+- Sprache: Spracherkennung im Browser, Whisper im Cluster oder ein externer Dienst, und was davon ist für Bestellungen freigegeben?
 - Braucht es für Stufe 5 eine eigene Oberfläche mit Leserechten auf Cluster-Status, und wie bleibt sie ohne kubectl?
