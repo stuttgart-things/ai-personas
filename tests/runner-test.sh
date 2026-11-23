@@ -3,13 +3,14 @@
 # image (task smoke mounts tests/ at /tests) or on a host with bash, jq, node.
 #   summary + report: a stream with several result events (#26)
 #   cleanup: the persona's orders of this run against a fake claims (ADR 0007)
+#   verdict: the scenario's verifiers against the run's orders (#4828)
 # usage: tests/runner-test.sh [bin dir]   (default: runner/ next to tests/,
 #        with the image's names persona-summary/-report/-cleanup when given)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 bin=${1:-}
-if [ -n "$bin" ]; then summary=$bin/persona-summary report=$bin/persona-report cleanup=$bin/persona-cleanup
-else summary=$here/../runner/summary report=$here/../runner/report cleanup=$here/../runner/cleanup; fi
+if [ -n "$bin" ]; then summary=$bin/persona-summary report=$bin/persona-report cleanup=$bin/persona-cleanup verdict=$bin/persona-verdict
+else summary=$here/../runner/summary report=$here/../runner/report cleanup=$here/../runner/cleanup verdict=$here/../runner/verdict; fi
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -87,3 +88,31 @@ for p in Ordered Ready TearingDown Deleted; do
   grep -qE "^\| [0-9:]{8} \| $p \|" "$mix/transcript.md" || fail "timeline from mixed/cut output lacks $p"
 done
 echo "report timeline from mixed and cut output ok"
+
+# --- verdict ----------------------------------------------------------------
+# A passing verify-vm-ssh-auto run on machinery-dev, then the same run with the
+# order on the wrong cluster and without Ready.
+vrun=$work/vrun; mkdir -p "$vrun"; rm -f "$FAKE_DIR"/orders/*.json
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok"}' > "$vrun/transcript.jsonl"
+echo '[{"order":"ord-v1","outcome":"deleted"}]' > "$vrun/cleanup.json"
+vorder() { # id cluster history-json
+  jq -n --arg id "$1" --arg c "$(at 30)" --arg mc "$2" --argjson h "$3" \
+    '{metadata: {name: $id, creationTimestamp: $c},
+      spec: {autoMerge: {rule: "persona-test-vms"}, placement: {managementCluster: $mc}, parameters: {owner: "group:default/ai-personas"}},
+      status: {phase: "Deleted", history: $h,
+               delivery: {pullRequest: {url: "https://github.com/o/fleet/pull/1", state: "merged"}}}}' > "$FAKE_DIR/orders/$1.json"
+}
+vorder ord-v1 machinery-dev '[{"phase":"Ordered"},{"phase":"PROpen"},{"phase":"Merged"},{"phase":"Ready"},{"phase":"Deleted"}]'
+scen=$here/../scenarios/verify-vm-ssh-auto.yaml
+PATH=$work/bin:$PATH MANAGEMENT_CLUSTER=machinery-dev "$verdict" "$vrun" "$scen" "$(at 0)" >/dev/null
+jq -e '.passed and .orders == 1 and .managementCluster == "machinery-dev"
+       and ([.checks[] | select(.kind == "hard") | .name] | sort) == ["auto-merged","claude-finished","cleanup","cluster","order-pr","xr-ready"]
+       and ([.checks[] | select(.name == "ssh-login")][0].kind == "advisory")' "$vrun/verdict.json" >/dev/null \
+  || fail "verdict pass: $(jq -c . "$vrun/verdict.json")"
+vorder ord-v1 machinery-labul '[{"phase":"Ordered"},{"phase":"Merged"},{"phase":"Deleted"}]'
+PATH=$work/bin:$PATH MANAGEMENT_CLUSTER=machinery-dev "$verdict" "$vrun" "$scen" "$(at 0)" >/dev/null
+jq -e '(.passed | not) and ([.checks[] | select(.ok == false) | .name] | sort) == ["cluster","xr-ready"]' "$vrun/verdict.json" >/dev/null \
+  || fail "verdict fail: $(jq -c '[.checks[] | {name, ok}]' "$vrun/verdict.json")"
+"$summary" "$vrun" r3 developer verify-vm-ssh-auto labul auto delete-claim
+jq -e '.verdict.passed == false' "$vrun/summary.json" >/dev/null || fail "summary verdict"
+echo "verdict ok"

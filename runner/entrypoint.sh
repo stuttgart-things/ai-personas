@@ -9,6 +9,10 @@
 #   CLAIM_API_URL      claim-machinery-api of the lab (templates, render)
 #   CLAIM_ORDERS_URL   machinery-order-service of the lab (claims order/orders)
 #   LAB                the lab, for the report
+#   MANAGEMENT_CLUSTER optional: the management cluster to order on. Told to
+#                      the persona (claims order --cluster) and checked by
+#                      persona-verdict; needed where a lab has several
+#                      (machinery-labul and the staging cluster machinery-dev)
 #   RUN_ID             defaults to <utc time>-<persona>-<scenario>
 #   OUT_DIR            defaults to /out (mount a host directory there)
 # Mounted (optional):
@@ -72,6 +76,9 @@ export CLAIM_API_TOKEN=$PERSONA_TOKEN
 settings=$base/surfaces/$surface.json
 allowed=("Bash(claims:*)")
 context="Dein Werkzeug ist \`claims\`, schon mit deinem Login eingerichtet."
+if [ -n "${MANAGEMENT_CLUSTER:-}" ]; then
+  context="$context Bestell auf dem Management-Cluster \`$MANAGEMENT_CLUSTER\` (\`claims order … --cluster $MANAGEMENT_CLUSTER\`), auf keinem anderen."
+fi
 if [ "$merge" = auto ]; then
   context="$context Für diese Test-Bestellung brauchst du kein Review: Mit \`claims order … --auto-merge\` merged der Bestelldienst den Pull Request selbst, sobald die Checks grün sind. Das gilt auch, wenn du etwas wieder löschst."
 fi
@@ -117,6 +124,8 @@ cleanup_rc=0
 if [ "$cleanup" = delete-claim ]; then
   persona-cleanup "$out" "$started" || cleanup_rc=$?
 fi
+# Did the scenario pass? Data for the summary and for a gate (verdict.json).
+persona-verdict "$out" "$sfile" "$started" || echo "persona-verdict failed" >&2
 persona-summary "$out" "$run_id" "$persona" "$scenario" "${LAB:-}" "$merge" "$cleanup" || echo "persona-summary failed" >&2
 persona-report "$out" >/dev/null || echo "persona-report failed" >&2
 

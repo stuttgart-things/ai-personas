@@ -52,6 +52,7 @@ COPY runner/entrypoint.sh /usr/local/bin/persona-run
 COPY runner/report /usr/local/bin/persona-report
 COPY runner/summary /usr/local/bin/persona-summary
 COPY runner/cleanup /usr/local/bin/persona-cleanup
+COPY runner/verdict /usr/local/bin/persona-verdict
 COPY runner/nss-user /usr/local/lib/persona-nss-user
 
 USER persona

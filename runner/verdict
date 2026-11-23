@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# persona-verdict <run dir> <scenario file> <started>: did the scenario pass?
+# Writes <run dir>/verdict.json and prints one line. Runs in the runner
+# container after persona-cleanup, with the persona's own token, through the
+# order service only (claims orders list/get), like the cleanup.
+#
+# WHY. A run that went through is not a scenario that passed: claude may give
+# up, the VM may never get Ready, the order may land on the wrong cluster.
+# Until now a person judged that from transcript.md. A gate that promotes a
+# release (Kargo on machinery-dev, stuttgart-things/stuttgart-things#4828)
+# needs the answer as data.
+#
+# WHAT IS CHECKED. The scenario's `expect:` verifiers that the order data can
+# prove, plus three implicit checks:
+#
+#   hard (decide `passed`)
+#     claude-finished  the last result event is not an error
+#     cluster          every order of the run is on $MANAGEMENT_CLUSTER (when set)
+#     cleanup          cleanup.json: every order deleted/cancelled/nothing (when present)
+#     order-pr         an order of the run got a pull request
+#     auto-merged      an auto-merge order whose pull request was merged
+#     xr-ready         an order of the run reached Ready (status.history)
+#     teardown-pr      an order got a delete-claim pull request
+#     xr-deleted       an order of the run ended Deleted
+#     order-refused    the run has no order
+#   advisory (reported, never decide)
+#     order-owner, ssh-login, teams-card, no-branches and any verifier this
+#     script does not know -- they need the transcript, Teams or git
+#
+# Exit 0 always: the verdict is data. The caller decides what a failed verdict
+# means (stage-time execute-persona-run fails the pipeline with verifyStrict).
+set -uo pipefail
+dir=${1:?run dir}; sfile=${2:?scenario file}; started=${3:?started}
+skew=${CLEANUP_SKEW:-120}
+want_cluster=${MANAGEMENT_CLUSTER:-}
+
+since=$(( $(date -u -d "$started" +%s) - skew ))
+checks='[]'
+add() { # name kind ok detail
+  checks=$(jq -c --arg n "$1" --arg k "$2" --argjson ok "$3" --arg d "$4" \
+    '. + [{name: $n, kind: $k, ok: $ok, detail: $d}]' <<<"$checks")
+}
+
+# claude itself
+last=$(jq -c 'select(.type == "result")' "$dir/transcript.jsonl" 2>/dev/null | tail -1)
+if [ -z "$last" ]; then add claude-finished hard false "no result event"
+elif jq -e '.is_error' <<<"$last" >/dev/null; then add claude-finished hard false "$(jq -r '.subtype // "error"' <<<"$last")"
+else add claude-finished hard true "$(jq -r '.subtype // "success"' <<<"$last")"; fi
+
+# The run's orders, in full (status.history, delivery, teardown).
+if list=$(claims orders list --mine -o json --non-interactive 2>/dev/null); then
+  orders='[]'
+  for id in $(jq -r --argjson since "$since" \
+      '.[] | select((.metadata.creationTimestamp | fromdateiso8601) >= $since) | .metadata.name' <<<"$list"); do
+    o=$(claims orders get "$id" -o json --non-interactive 2>/dev/null) || o=$(jq -c --arg id "$id" '.[] | select(.metadata.name == $id)' <<<"$list")
+    orders=$(jq -c --argjson o "$o" '. + [$o]' <<<"$orders")
+  done
+else
+  orders=null
+  add orders-listed hard false "claims orders list failed"
+fi
+n=$(jq 'length' <<<"${orders:-[]}")
+
+if [ -n "$want_cluster" ] && [ "$orders" != null ]; then
+  wrong=$(jq -r --arg c "$want_cluster" \
+    '[.[] | select((.spec.placement.managementCluster // "") != $c) | "\(.metadata.name)@\(.spec.placement.managementCluster // "?")"] | join(", ")' <<<"$orders")
+  if [ -z "$wrong" ]; then add cluster hard true "$n order(s) on $want_cluster"
+  else add cluster hard false "not on $want_cluster: $wrong"; fi
+fi
+
+if [ -s "$dir/cleanup.json" ]; then
+  bad=$(jq -r '[.[] | select(.outcome | IN("deleted", "cancelled", "nothing") | not) | "\(.order // "?"): \(.outcome)"] | join(", ")' "$dir/cleanup.json")
+  if [ -z "$bad" ]; then add cleanup hard true "$(jq length "$dir/cleanup.json") order(s) cleaned up"
+  else add cleanup hard false "$bad"; fi
+fi
+
+some() { # jq filter over one order -> at least one order matches
+  [ "$orders" != null ] && jq -e "any(.[]; $1)" <<<"$orders" >/dev/null
+}
+verdict_of() { if "$@"; then echo true; else echo false; fi; }
+
+for v in $(js-yaml "$sfile" | jq -r '.expect // [] | .[] | .verifier // empty'); do
+  case $v in
+    order-pr)
+      add "$v" hard "$(verdict_of some '(.status.delivery.pullRequest.url // "") != ""')" "$n order(s) in this run";;
+    auto-merged)
+      add "$v" hard "$(verdict_of some '.spec.autoMerge != null and ((.status.delivery.pullRequest.state // "") == "merged" or any(.status.history[]?; .phase == "Merged"))')" "order pull request merged under an auto-merge rule";;
+    xr-ready)
+      add "$v" hard "$(verdict_of some 'any(.status.history[]?; .phase == "Ready") or .status.phase == "Ready"')" "an order reached Ready";;
+    teardown-pr)
+      add "$v" hard "$(verdict_of some '(.status.teardown.delivery.pullRequest.url // "") != ""')" "delete-claim pull request";;
+    xr-deleted)
+      add "$v" hard "$(verdict_of some '.status.phase == "Deleted"')" "an order ended Deleted";;
+    order-refused)
+      add "$v" hard "$([ "$n" -eq 0 ] && echo true || echo false)" "$n order(s) created";;
+    order-owner)
+      add "$v" advisory "$(verdict_of some '((.status.rendered.parameters.owner // .spec.parameters.owner // "") | tostring) != ""')" \
+        "owner: $(jq -r '[.[]? | (.status.rendered.parameters.owner // .spec.parameters.owner // "-") | tostring] | unique | join(", ")' <<<"${orders:-[]}")";;
+    *)
+      add "$v" advisory null "not checkable from the order data";;
+  esac
+done
+
+jq -n --argjson checks "$checks" --arg cluster "$want_cluster" --argjson n "$n" \
+  '{passed: ([$checks[] | select(.kind == "hard") | .ok] | all),
+    managementCluster: (if $cluster == "" then null else $cluster end),
+    orders: $n, checks: $checks}' > "$dir/verdict.json"
+echo "verdict: $(jq -r 'if .passed then "passed" else "FAILED: " + ([.checks[] | select(.kind == "hard" and (.ok | not)) | .name] | join(", ")) end' "$dir/verdict.json")"
